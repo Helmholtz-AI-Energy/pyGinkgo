@@ -6,7 +6,8 @@
 
 namespace py = pybind11;
 
-void init_array(py::module_ &);
+template<typename ValueType>
+void declare_array(py::module_&);
 
 PYBIND11_MODULE(pyGinkgo, m) {
   m.doc() = "Python bindings for the Ginkgo framework";
@@ -29,5 +30,9 @@ PYBIND11_MODULE(pyGinkgo, m) {
 
   py::module_ module_base =
       m.def_submodule("base", "Submodule for Ginkgos low level type bindings");
-  init_array(module_base);
+
+    declare_array<float>(module_base);
+    declare_array<double>(module_base);
+    declare_array<int>(module_base);
+    declare_array<long>(module_base);
 }

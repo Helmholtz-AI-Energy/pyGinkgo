@@ -7,14 +7,15 @@
 
 namespace py = pybind11;
 
-void init_array(py::module_ &module_base) {
+template<typename ValueType>
+void declare_array(py::module_ &module_base) {
   py::class_<gko::array<ValueType>>(module_base, "array", py::buffer_protocol())
       .def(py::init<std::shared_ptr<const gko::Executor>, int>())
       .def(py::init<std::shared_ptr<const gko::Executor>,
                     gko::array<ValueType> &>())
       .def(py::init(
           [](std::shared_ptr<gko::Executor> exec,
-             py::array_t<double, py::array::c_style | py::array::forcecast> b) {
+             py::array_t<ValueType, py::array::c_style | py::array::forcecast> b) {
             // for documentation of the second argument see
             // see
             // https://pybind11.readthedocs.io/en/stable/advanced/pycpp/numpy.html#arrays
@@ -55,3 +56,12 @@ void init_array(py::module_ &module_base) {
         return arr.get_const_data()[idx];
       });
 }
+
+template<>
+void declare_array<float>(py::module_&);
+template<>
+void declare_array<double>(py::module_&);
+template<>
+void declare_array<int>(py::module_&);
+template<>
+void declare_array<long>(py::module_&);

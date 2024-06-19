@@ -7,6 +7,3 @@
 #include "ginkgo/ginkgo.hpp"
 
 namespace py = pybind11;
-
-using ValueType = double;
-using IndexType = int;
