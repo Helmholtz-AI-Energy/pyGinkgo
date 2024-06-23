@@ -4,46 +4,60 @@ import numpy as np
 
 sys.path.append("../build")
 
-values = [1, 2, -1, 3, 4, -1, 5, 6, -1]
-array_length = 10
 
-
-def test_can_create_dense_linop():
+class TestDense:
+    values = [1.0, 2.0, -1.0, 3.0, 4.0, -1.0, 5.0, 6.0, -1.0]
     ref = pyGinkgo.ReferenceExecutor()
-    dense = pyGinkgo.matrix.dense(self.ref, length)
 
-def test_can_create_dense_from_array():
-    arr = pyGinkgo.array(ref, 9, np.array([self.values]))
-    dense = pyGinkgo.matrix.Dense(ref, (3, 2), arr, 3)
+    def test_can_create_dense_linop(self):
+        dense = pyGinkgo.matrix.dense(self.ref)
+        assert dense == dense
 
-    assert dense[2] == 5
-    assert dense[2, 1] == 6
+    def test_can_create_dense_linop_with_dim(self):
+        dense = pyGinkgo.matrix.dense(self.ref, (len(self.values), 1))
+        assert dense == dense
 
-def test_can_create_dense_from_list():
-    dense = pyGinkgo.matrix.Dense(ref, (3, 2), values, 3)
+    def test_can_create_dense_from_1D_np_array(self):
+        dense = pyGinkgo.matrix.dense(self.ref, np.array([self.values]))
 
-    assert dense.at(2, 1) == 6
+        assert dense.get_num_stored_elements() == len(self.values)
+        assert dense.at(2) == -1.0
+        assert dense.at(0, 2) == dense.at(2)
+        # test if it can be called several times
+        assert dense.at(0, 2) == dense.at(2)
 
-def test_can_create_dense_from_nparray():
-    dense = pyGinkgo.matrix.Dense(ref, (3, 2), np.array(values), 3)
+    def test_can_read_mtx_file(self):
+        # Matrix market format stores column major order
+        dense = pyGinkgo.matrix.read_dense(
+            "/Users/go/Code/pyGinkgo/tests/dense_example.mtx", self.ref
+        )
 
-    assert dense.at(2, 1) == 6
+        assert dense.get_num_stored_elements() == 12
+        # The next tests segfaults
+        assert dense.at(0, 2) == 0.2785
+        assert dense.at(2) == 0.2785
+        assert dense.at(2, 2) == 0.9575
 
-def test_dense_support_basic_functionality():
-    np_array = np.array(values)
-    dense = pyGinkgo.matrix.Dense(ref, (9, 1), np_array, 1)
+    def test_can_create_dense_from_1D_np_array_with_stride(self):
+        dense = pyGinkgo.matrix.dense(self.ref, (3, 3), np.array([self.values]), 3)
 
-    result = pyGinkgo.matrix.Dense(ref, (1, 1))
+        assert dense.get_num_stored_elements() == len(self.values)
+        assert dense.at(2) == -1.0
+        assert dense.at(0, 2) == dense.at(2)
 
-    dense.compute_norm1(result)
-    assert result[0, 0] == np.linalg.norm(np_array)
+    def test_dense_support_basic_functionality(self):
+        dense = pyGinkgo.matrix.dense(self.ref, (3, 3), np.array([self.values]), 3)
 
-    dense.compute_norm2(result)
-    assert result[0, 0] == np.linalg.norm(np_array)
+        dense.scale(5)
+        assert dense.at(2) == -5.0
+        assert dense.at(1, 2) == dense.at(5)
 
-    # TODO for now just test if callable add checking of results
-    dense.scale(result)
-    dense.inv_scale(result)
-    dense.add_scale(result)
-    dense.sub_scale(result)
-    dense.compute_dot(dense, result)
+        dense.inv_scale(5)
+        assert dense.at(2) == -1.0
+        assert dense.at(1, 2) == dense.at(5)
+
+    def test_can_create_dense_from_nparray(self):
+        ref = pyGinkgo.ReferenceExecutor()
+        dense = pyGinkgo.matrix.dense(ref, (3, 2), np.array(self.values), 3)
+
+        assert dense.at(2, 1) == 6

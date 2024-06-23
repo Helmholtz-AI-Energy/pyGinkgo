@@ -50,11 +50,9 @@ if(NOT ginkgo_FOUND)
 
 endif()
 
-pybind11_add_module(pyGinkgo ${PROJECT_SOURCE_DIR}/src/python.cpp
-                    ${PROJECT_SOURCE_DIR}/src/array.cpp
-                    ${PROJECT_SOURCE_DIR}/src/dense.cpp
-                    #${PROJECT_SOURCE_DIR}/src/matrix.cpp
-                    )
+pybind11_add_module(
+  pyGinkgo ${PROJECT_SOURCE_DIR}/src/python.cpp
+  ${PROJECT_SOURCE_DIR}/src/array.cpp ${PROJECT_SOURCE_DIR}/src/dense.cpp)
 
 target_include_directories(pyGinkgo PRIVATE ${Ginkgo_BINARY_DIR}/include)
 target_link_libraries(pyGinkgo PRIVATE Ginkgo::ginkgo)
