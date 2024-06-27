@@ -33,7 +33,6 @@ class TestDense:
         )
 
         assert dense.get_num_stored_elements() == 12
-        # The next tests segfaults
         assert dense.at(0, 2) == 0.2785
         assert dense.at(2) == 0.2785
         assert dense.at(2, 2) == 0.9575
