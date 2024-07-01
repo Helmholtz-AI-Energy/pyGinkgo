@@ -162,6 +162,13 @@ void init_dense(py::module_ &module_matrix) {
              o->fill(s);
              m.inv_scale(o);
            })
+      .def("compute_norm1",
+           [](gko::matrix::Dense<ValueType> &m, gko::matrix::Dense<ValueType>& res) {
+	       auto res_clone = gko::share(res.clone());
+	       m.compute_norm1(res_clone);
+	       res.copy_from(res_clone);
+           },
+           "Adds `b` scaled by `alpha` to the matrix (aka: BLAS axpy).")
       .def("add_scaled", &gko::matrix::Dense<ValueType>::add_scaled,
            "Adds `b` scaled by `alpha` to the matrix (aka: BLAS axpy).")
       .def("sub_scaled", &gko::matrix::Dense<ValueType>::sub_scaled,

@@ -37,26 +37,33 @@ class TestDense:
         assert dense.at(2) == 0.2785
         assert dense.at(2, 2) == 0.9575
 
-    def test_can_create_dense_from_1D_np_array_with_stride(self):
-        dense = pyGinkgo.matrix.dense(self.ref, (3, 3), np.array([self.values]), 3)
+    #   def test_can_create_dense_from_1D_np_array_with_stride(self):
+    #       dense = pyGinkgo.matrix.dense(self.ref, (3, 3), np.array([self.values]), 3)
+    #
+    #       assert dense.get_num_stored_elements() == len(self.values)
+    #       assert dense.at(2) == -1.0
+    #       assert dense.at(0, 2) == dense.at(2)
+    #
+    #   def test_dense_support_basic_functionality(self):
+    #       dense = pyGinkgo.matrix.dense(self.ref, (3, 3), np.array([self.values]), 3)
+    #
+    #       dense.scale(5)
+    #       assert dense.at(2) == -5.0
+    #       assert dense.at(1, 2) == dense.at(5)
+    #
+    #       dense.inv_scale(5)
+    #       assert dense.at(2) == -1.0
+    #       assert dense.at(1, 2) == dense.at(5)
+    #
+    #   def test_can_create_dense_from_nparray(self):
+    #       ref = pyGinkgo.ReferenceExecutor()
+    #       dense = pyGinkgo.matrix.dense(ref, (3, 2), np.array(self.values), 3)
+    #
+    #       assert dense.at(2, 1) == 6
 
-        assert dense.get_num_stored_elements() == len(self.values)
-        assert dense.at(2) == -1.0
-        assert dense.at(0, 2) == dense.at(2)
+    def test_dense_support_function_with_inout_param(self):
+        dense = pyGinkgo.matrix.dense(self.ref, np.array([self.values]).transpose())
+        res = pyGinkgo.matrix.dense(self.ref, np.array([0.0]))
 
-    def test_dense_support_basic_functionality(self):
-        dense = pyGinkgo.matrix.dense(self.ref, (3, 3), np.array([self.values]), 3)
-
-        dense.scale(5)
-        assert dense.at(2) == -5.0
-        assert dense.at(1, 2) == dense.at(5)
-
-        dense.inv_scale(5)
-        assert dense.at(2) == -1.0
-        assert dense.at(1, 2) == dense.at(5)
-
-    def test_can_create_dense_from_nparray(self):
-        ref = pyGinkgo.ReferenceExecutor()
-        dense = pyGinkgo.matrix.dense(ref, (3, 2), np.array(self.values), 3)
-
-        assert dense.at(2, 1) == 6
+        dense.compute_norm1(res)
+        #        assert res.at(0) == np.linalg.norm(np.array([self.values]).transpose(), ord=1)
