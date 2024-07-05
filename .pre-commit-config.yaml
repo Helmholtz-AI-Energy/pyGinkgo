@@ -4,7 +4,7 @@ repos:
     hooks:
       - id: mypy
         additional_dependencies: [types-all]
-        files: ^(tests|examples)/.*\.py$
+        files: ^(tests|examples)/.*\.(py|ipynb)$
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
     rev: v0.4.5
@@ -12,27 +12,27 @@ repos:
       # Run the linter.
       - id: ruff
         args: [ --fix ]
-        files: ^(tests|examples)/.*\.py$
+        files: ^(tests|examples)/.*\.(py|ipynb)$
       # Run the formatter.
       - id: ruff-format
-        files: ^(tests|examples)/.*\.py$
+        files: ^(tests|examples)/.*\.(py|ipynb)$
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
       - id: trailing-whitespace
-        files: ^(tests|examples)/.*\.py$
+        files: ^(tests|examples)/.*\.(py|ipynb)$
       - id: end-of-file-fixer
-        files: ^(tests|examples)/.*\.py$
+        files: ^(tests|examples)/.*\.(py|ipynb)$
       - id: check-yaml
-        files: ^(tests|examples)/.*\.py$
+        files: ^(tests|examples)/.*\.(py|ipynb)$
       - id: check-added-large-files
-        files: ^(tests|examples)/.*\.py$
+        files: ^(tests|examples)/.*\.(py|ipynb)$
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:
     - id: detect-secrets
       exclude: example.secrets
-      files: ^(tests|examples)/.*\.py$
+      files: ^(tests|examples)/.*\.(py|ipynb)$
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:
@@ -43,3 +43,13 @@ repos:
     hooks:
       - id: clang-format
         files: ^src/.*\.(cpp|hpp)$
+  - repo: https://github.com/nbQA-dev/nbQA
+    rev: 1.8.5
+    hooks:
+      - id: nbqa-flake8
+        files: ^(examples)/.*\.(py|ipynb)$
+      - id: nbqa-black
+        args: [--line-length=79]
+        files: ^(examples)/.*\.(py|ipynb)$
+      - id: nbqa-isort
+        files: ^(examples)/.*\.(py|ipynb)$
