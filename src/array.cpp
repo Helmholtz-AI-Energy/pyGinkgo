@@ -55,5 +55,8 @@ void init_array(py::module_ &module) {
         return arr.get_const_data()[idx];
       });
 
-   module.def("reduce_add", pybind11::overload_cast<const gko::array<ValueType>&,const ValueType>(&gko::reduce_add<ValueType>));
+  module.def(
+      "reduce_add",
+      pybind11::overload_cast<const gko::array<ValueType> &, const ValueType>(
+          &gko::reduce_add<ValueType>));
 }
