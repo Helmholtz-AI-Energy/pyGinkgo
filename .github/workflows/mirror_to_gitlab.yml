@@ -11,37 +11,16 @@ env:
 
 jobs:
   mirror_repository:
-
+    runs-on: ubuntu-latest
 
     steps:
-  
-  - name: mirror-repository
-  # You may pin to the exact commit or the version.
-  # uses: yesolutions/mirror-action@1708f16cdb28634fd3ba10c5c79abc91f5578a14
-  uses: yesolutions/mirror-action@v0.7.0
-  with:
-    # The remote ref name to use. 'mirror' by default. Useful to avoid conflicts with existing remotes.
-    REMOTE_NAME: pyGinkgo_mirror
-    # The remote repository e.g. https://github.com/octocat/foo.git or git@github.com:octocat/foo.git
-    REMOTE: https://gitlab.kit.edu/keshvi.tuteja2/pyGinkgo.git
-    # Username for remote repository
-    GIT_USERNAME: # keshvi.tuteja2
-    # The git HTTPS password or token for the remote repository
-    GIT_PASSWORD: ${{ secrets.GITLAB_TOKEN_MIRROR }} 
-    # The ssh private key for writing to the remote repository, if using ssh
-    #GIT_SSH_PRIVATE_KEY: # optional
-    # The ssh public key for writing to the remote repository. Normally, not required at all
-    #GIT_SSH_PUBLIC_KEY: # optional
-    # The contents of an SSH known_hosts file for host key verification
-    #GIT_SSH_KNOWN_HOSTS: # optional
-    # If true, skip host key verification. Mutually exclusive with GIT_SSH_KNOWN_HOSTS
-    #GIT_SSH_NO_VERIFY_HOST: # optional, default is false
-    # Push another ref rather than the current branch (GITHUB_REF) from which the action was triggered. Only effective when PUSH_ALL_REFS is false
-    #GIT_REF: # optional, default is ${{ github.ref }}
-    # Push all refs instead of just the current branch
-    #PUSH_ALL_REFS: # optional, default is true
-    # The arguments to use when pushing the repository
-    #GIT_PUSH_ARGS: # optional, default is --tags --force --prune
-    # set to "true" to enable debug mode
-    #DEBUG: # optional, default is false
-          
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Mirror repository
+      uses: yesolutions/mirror-action@v0.7.0
+      with:
+        REMOTE_NAME: pyGinkgo_mirror
+        REMOTE: https://gitlab.kit.edu/keshvi.tuteja2/pyGinkgo.git
+        GIT_USERNAME: keshvi.tuteja2
+        GIT_PASSWORD: ${{ secrets.GITLAB_TOKEN_MIRROR }}
