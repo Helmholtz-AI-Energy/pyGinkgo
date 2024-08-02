@@ -1,4 +1,4 @@
-name: mirror_repository
+name: Mirror and run GitLab CI
 
 on:
   push:
@@ -10,17 +10,19 @@ env:
   CTEST_OUTPUT_ON_FAILURE: 1
 
 jobs:
-  mirror_repository:
+  mirror:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
-
-    - name: Mirror repository
-      uses: yesolutions/mirror-action@v0.7.0
+    - uses: actions/checkout@v1
+    - name: Mirror + trigger CI
+      uses: SvanBoxel/gitlab-mirror-and-ci-action@master
       with:
-        REMOTE_NAME: pyGinkgo_mirror
-        REMOTE: https://gitlab.kit.edu/keshvi.tuteja2/pyGinkgo.git
-        GIT_USERNAME: keshvi.tuteja2
-        GIT_PASSWORD: ${{ secrets.GITLAB_TOKEN_MIRROR }}
+        args: "https://gitlab.kit.edu/keshvi.tuteja2/testing_ci_cd.git"
+      env:
+        FOLLOW_TAGS: "false"
+        FORCE_PUSH: "false"
+        GITLAB_HOSTNAME: "gitlab.com"
+        GITLAB_USERNAME: "keshvi.tuteja2"
+        GITLAB_PASSWORD: ${{ secrets.GITLAB_TOKEN_MIRROR }}
+        GITLAB_PROJECT_ID: "175011" 
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
