@@ -17,41 +17,23 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v2
 
-    - name: Install jq
-      run: sudo apt-get install -y jq
-
-    - name: Set Variables
-      id: vars
-      run: |
-        echo "BRANCH_NAME=${{ github.head_ref || github.ref_name }}" >> $GITHUB_ENV
-        echo "COMMIT_SHA=${{ github.sha }}" >> $GITHUB_ENV
-        echo "PR_NUMBER=${{ github.event.pull_request.number || 'null' }}" >> $GITHUB_ENV
-
     - name: Trigger GitLab Pipeline
       id: trigger
       run: |
-        branch=${{ env.BRANCH_NAME }}
-        sha=${{ env.COMMIT_SHA }}
-        pr_number=${{ env.PR_NUMBER }}
-        
-        # Construct the JSON payload
-        json_payload=$(jq -n --arg branch "$branch" --arg sha "$sha" --arg pr_number "$pr_number" \
-          '{ref: $branch, variables: [{key: "COMMIT_SHA", value: $sha}, {key: "PR_NUMBER", value: $pr_number}]}')
-        
-        # Trigger the pipeline
+        branch=${{ github.head_ref || github.ref_name }}
         response=$(curl -s -X POST -H "Content-Type: application/json" \
-          -d "$json_payload" \
+          -d "{\"ref\":\"refs/heads/main\"}" \
+          -F "variables[SHA]=${{ github.sha }}" \
+          -F "variables[BRANCH_NAME]=${{ github.head_ref }}"\
+          -F "variables[PR_NUMBER]=${{ github.event.pull_request.number }}\
           "https://gitlab.kit.edu/api/v4/projects/175208/trigger/pipeline?token=${{ secrets.GITLAB_TOKEN }}")
-
         echo "Response: $response"
         pipeline_id=$(echo $response | jq -r '.id')
         pipeline_url=$(echo $response | jq -r '.web_url')
-        
         if [ "$pipeline_id" == "null" ]; then
           echo "Pipeline ID is null. Check the response for errors."
           exit 1
         fi
-        
         echo "PIPELINE_ID=$pipeline_id" >> $GITHUB_ENV
         echo "PIPELINE_URL=$pipeline_url" >> $GITHUB_ENV
 
