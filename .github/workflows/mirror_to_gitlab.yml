@@ -42,6 +42,7 @@ jobs:
         fi
         echo "PIPELINE_ID=$pipeline_id" >> $GITHUB_ENV
         echo "PIPELINE_URL=$pipeline_url" >> $GITHUB_ENV
+        echo "GitHub SHA: ${{ github.sha }}
       
 
 
