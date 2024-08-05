@@ -52,7 +52,8 @@ endif()
 
 pybind11_add_module(
   pyGinkgo ${PROJECT_SOURCE_DIR}/src/python.cpp
-  ${PROJECT_SOURCE_DIR}/src/array.cpp ${PROJECT_SOURCE_DIR}/src/dense.cpp)
+  ${PROJECT_SOURCE_DIR}/src/array.cpp ${PROJECT_SOURCE_DIR}/src/dense.cpp
+  ${PROJECT_SOURCE_DIR}/src/matrix.cpp)
 
 target_include_directories(pyGinkgo PRIVATE ${Ginkgo_BINARY_DIR}/include)
 target_link_libraries(pyGinkgo PRIVATE Ginkgo::ginkgo)
@@ -65,6 +66,9 @@ add_test(NAME pyginkgo_import_test
 add_test(NAME pyginkgo_array_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array.py)
-add_test(NAME pyginkgo_matrix_test
+add_test(NAME pyginkgo_dense_matrix_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dense.py)
+add_test(NAME pyginkgo_sparse_matrix_test
+         COMMAND ${PYTHON_EXECUTABLE} -m pytest
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sparse.py)

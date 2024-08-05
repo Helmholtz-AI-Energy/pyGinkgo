@@ -5,6 +5,18 @@ on:
     pull_request:
       types: [opened, synchronize]
 jobs:
+  pre-commit-checks:
+    name: Pre-commit checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files
   typos-check:
     name: Spell check
     runs-on: ubuntu-latest
@@ -23,7 +35,7 @@ jobs:
           pip3 install reuse
       - name: Execute reuse linter
         run: |
-          reuse lint
+          reuse lint       
   changelog:
     name: Changelog check
     runs-on: ubuntu-latest

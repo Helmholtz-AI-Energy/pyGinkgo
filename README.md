@@ -37,7 +37,11 @@ cmake --build . -j=number_of_cores
 ```
 
 ### Running the tests
-For now, there is just one test implemented. You would need to install pytest to be able to run this test as follows:
+You would need to install pytest to be able to run the tests. To run all tests:
+```bash
+ctest
+```
+To run a particular test, say 'pyginkgo_import_test':
 ```bash
 ctest -R pyginkgo_import_test
 ```

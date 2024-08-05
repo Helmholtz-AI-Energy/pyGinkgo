@@ -12,34 +12,39 @@ void init_dense(py::module_ &module_matrix) {
         gko::read<gko::matrix::Dense<ValueType>>(std::ifstream(fn), exec));
   });
 
+  /* function to create a dense matrix from py::buffer object
+   *
+   */
+  auto init_func = [](std::shared_ptr<gko::Executor> exec, py::buffer b) {
+    /* Request a buffer descriptor from Python */
+    py::buffer_info info = b.request();
+
+    if (info.format != py::format_descriptor<ValueType>::format())
+      throw std::runtime_error("Incompatible dtype");
+
+    /* create a view into numpy data */
+    auto elems =
+        (info.ndim == 1) ? info.shape[0] : info.shape[0] * info.shape[1];
+
+    auto view = gko::array<ValueType>::view(exec->get_master(), elems,
+                                            (ValueType *)info.ptr);
+
+    auto rows = info.shape[0];
+    auto cols = (info.ndim == 1) ? 1 : info.shape[1];
+
+    return gko::matrix::Dense<ValueType>::create(exec, gko::dim<2>{rows, cols},
+                                                 view, cols);
+  };
+
   py::class_<gko::matrix::Dense<ValueType>,
              std::shared_ptr<gko::matrix::Dense<ValueType>>, gko::LinOp>(
       module_matrix, "dense", py::buffer_protocol())
-      .def(py::init([](std::shared_ptr<gko::Executor> exec, py::buffer b) {
-        /* Request a buffer descriptor from Python */
-        py::buffer_info info = b.request();
-
-        if (info.format != py::format_descriptor<ValueType>::format())
-          throw std::runtime_error("Incompatible dtype");
-
+      .def(py::init([init_func](py::buffer b) {
         auto ref = gko::ReferenceExecutor::create();
-
-        /* create a view into numpy data */
-        auto elems =
-            (info.ndim == 1) ? info.shape[0] : info.shape[0] * info.shape[1];
-
-        auto view =
-            gko::array<ValueType>::view(ref, elems, (ValueType *)info.ptr);
-
-        auto rows = info.shape[0];
-        auto cols = (info.ndim == 1) ? 1 : info.shape[1];
-
-        // TODO fix dim<2>
-        // TODO fix stride since the stride is given in bytes on the numpy
-        // side
-        return gko::matrix::Dense<ValueType>::create(
-            exec, gko::dim<2>{rows, cols}, view, cols);
+        return init_func(ref, b);
       }))
+      .def(py::init([init_func](std::shared_ptr<gko::Executor> exec,
+                                py::buffer b) { return init_func(exec, b); }))
       .def(py::init([](std::shared_ptr<gko::Executor> exec) {
         return gko::share(gko::matrix::Dense<ValueType>::create(exec));
       }))
@@ -151,6 +156,12 @@ void init_dense(py::module_ &module_matrix) {
           );
         }
       })
+      .def(
+          "apply",
+          [](const gko::matrix::Dense<ValueType> &d,
+             std::shared_ptr<const gko::LinOp> b,
+             std::shared_ptr<gko::LinOp> x) { d.apply(b, x); },
+          "")
       .def("scale",
            [](gko::matrix::Dense<ValueType> &m, ValueType s) {
              auto o = gko::matrix::Dense<ValueType>::create(m.get_executor(),

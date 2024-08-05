@@ -8,6 +8,8 @@ namespace py = pybind11;
 
 void init_array(py::module_ &);
 void init_dense(py::module_ &);
+void init_coo(py::module_ &);
+void init_csr(py::module_ &);
 
 PYBIND11_MODULE(pyGinkgo, m) {
   m.doc() = "Python bindings for the Ginkgo framework";
@@ -41,4 +43,6 @@ PYBIND11_MODULE(pyGinkgo, m) {
       m.def_submodule("matrix", "Submodule for Ginkgos matrix type bindings");
 
   init_dense(module_matrix);
+  init_coo(module_matrix);
+  init_csr(module_matrix);
 }

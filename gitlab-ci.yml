@@ -1,0 +1,32 @@
+stages:
+  - build
+
+variables:
+  CTEST_OUTPUT_ON_FAILURE: "1"
+
+build:
+  stage: build
+  image: ubuntu:latest
+  tags:
+    - kgr1-instance-extraordinary
+  before_script:
+    - apt-get update
+    - apt-get install -y sudo python3-venv build-essential git
+  script:
+    - apt-get install -y cmake ninja-build libopenmpi-dev python3-pip
+    - python3 -m venv venv
+    - source venv/bin/activate
+    - pip install --upgrade pip
+    - pip install pytest numpy
+    - export CC=gcc
+    - export CXX=g++
+    - mkdir -p build
+    - cd build
+    - cmake -GNinja -DGINKGO_BUILD_OMP=OFF ..
+    - cmake --build .
+    - ctest -R pyginkgo --output-on-failure
+
+
+
+
+
