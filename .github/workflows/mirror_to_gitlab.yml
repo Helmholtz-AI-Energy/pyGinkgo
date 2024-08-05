@@ -23,13 +23,16 @@ jobs:
       env:
         AUTHOR: ${{ github.event.pull_request.assignee.login }}
         BRANCH: ${{ github.head_ref }}
-        PIPE_TRIGGER_TOKEN: ${{ secrets.BENCH_PIPE_TRIGGER }}
         SHA: ${{ github.sha }}
         PR_NUMBER: ${{ github.event.pull_request.number }}      
       run: |
         branch=${{ github.head_ref || github.ref_name }}
         response=$(curl -s -X POST -H "Content-Type: application/json" \
           -d "{\"ref\":\"refs/heads/main\"}" \
+          -F "variables[SHA]=$SHA" \
+          -F "variables[SHORT_SHA]=${SHORT_SHA}" \
+          -F "variables[BRANCH]=$BRANCH" \
+          -F "variables[PR]=$PR_NUMBER" \       
           "https://gitlab.kit.edu/api/v4/projects/175208/trigger/pipeline?token=${{ secrets.GITLAB_TOKEN }}")
         echo "Response: $response"
         pipeline_id=$(echo $response | jq -r '.id')
