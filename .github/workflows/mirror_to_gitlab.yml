@@ -31,10 +31,8 @@ jobs:
             -F "token=$PIPE_TRIGGER_TOKEN" \
             -F "ref=main" \
             -F "variables[SHA]=$SHA" \
-            -F "variables[SHORT_SHA]=${SHORT_SHA}" \
             -F "variables[BRANCH]=$BRANCH" \
             -F "variables[PR]=$PR_NUMBER" \
-            -F "variables[AUTHOR]=${AUTHOR:-heat_team}" \
             https://gitlab.kit.edu/api/v4/projects/175208/trigger/pipeline
         echo "Response: $response"
         pipeline_id=$(echo $response | jq -r '.id')
