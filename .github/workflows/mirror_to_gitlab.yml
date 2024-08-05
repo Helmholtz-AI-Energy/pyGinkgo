@@ -12,6 +12,7 @@ env:
 jobs:
   trigger_gitlab_ci:
     runs-on: ubuntu-latest
+    
 
     steps:
     - name: Checkout code
@@ -19,6 +20,12 @@ jobs:
 
     - name: Trigger GitLab Pipeline
       id: trigger
+      env:
+        AUTHOR: ${{ github.event.pull_request.assignee.login }}
+        BRANCH: ${{ github.head_ref }}
+        PIPE_TRIGGER_TOKEN: ${{ secrets.BENCH_PIPE_TRIGGER }}
+        SHA: ${{ github.sha }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}      
       run: |
         branch=${{ github.head_ref || github.ref_name }}
         response=$(curl -s -X POST -H "Content-Type: application/json" \
