@@ -1,4 +1,4 @@
-name: Mirror and run GitLab CI
+name: Trigger GitLab CI
 
 on:
   push:
@@ -10,19 +10,26 @@ env:
   CTEST_OUTPUT_ON_FAILURE: 1
 
 jobs:
-  mirror:
+  trigger_gitlab_ci:
     runs-on: ubuntu-latest
+
     steps:
-    - uses: actions/checkout@v4
-    - name: Mirror + trigger CI
-      uses: SvanBoxel/gitlab-mirror-and-ci-action@master
-      with:
-        args: "https://gitlab.kit.edu/keshvi.tuteja2/testing_ci_cd.git"
-      env:
-        FOLLOW_TAGS: "false"
-        FORCE_PUSH: "false"
-        GITLAB_HOSTNAME: "gitlab.com"
-        GITLAB_USERNAME: "keshvi.tuteja2"
-        GITLAB_PASSWORD: ${{ secrets.GITLAB_TOKEN_MIRROR }}
-        GITLAB_PROJECT_ID: "175011" 
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Trigger GitLab Pipeline
+      id: trigger
+      run: |
+        branch=${{ github.head_ref || github.ref_name }}
+        response=$(curl -s -X POST -H "Content-Type: application/json" \
+          -d "{\"ref\":\"refs/heads/main\"}" \
+          "https://gitlab.kit.edu/api/v4/projects/175208/trigger/pipeline?token=${{ secrets.GITLAB_TOKEN }}")
+        echo "Response: $response"
+        pipeline_id=$(echo $response | jq -r '.id')
+        pipeline_url=$(echo $response | jq -r '.web_url')
+        if [ "$pipeline_id" == "null" ]; then
+          echo "Pipeline ID is null. Check the response for errors."
+          exit 1
+        fi
+        echo "PIPELINE_ID=$pipeline_id" >> $GITHUB_ENV
+        echo "PIPELINE_URL=$pipeline_url" >> $GITHUB_ENV
