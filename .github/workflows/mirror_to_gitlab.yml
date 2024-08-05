@@ -12,7 +12,6 @@ env:
 jobs:
   trigger_gitlab_ci:
     runs-on: ubuntu-latest
-    
 
     steps:
     - name: Checkout code
@@ -24,16 +23,16 @@ jobs:
         BRANCH: ${{ github.head_ref }}
         SHA: ${{ github.sha }}
         PR_NUMBER: ${{ github.event.pull_request.number }}    
-        PIPE_TRIGGER_TOKEN: ${{secrets.GITLAB_TOKEN }}
+        PIPE_TRIGGER_TOKEN: ${{ secrets.GITLAB_TOKEN }}
       run: |
-         curl -s -X POST \
-            --fail-with-body \
-            -F "token=$PIPE_TRIGGER_TOKEN" \
-            -F "ref=main" \
-            -F "variables[SHA]=$SHA" \
-            -F "variables[BRANCH]=$BRANCH" \
-            -F "variables[PR]=$PR_NUMBER" \
-            https://gitlab.kit.edu/api/v4/projects/175208/trigger/pipeline
+        response=$(curl -s -X POST \
+          --fail-with-body \
+          -F "token=$PIPE_TRIGGER_TOKEN" \
+          -F "ref=main" \
+          -F "variables[SHA]=$SHA" \
+          -F "variables[BRANCH]=$BRANCH" \
+          -F "variables[PR]=$PR_NUMBER" \
+          https://gitlab.kit.edu/api/v4/projects/175208/trigger/pipeline)
         echo "Response: $response"
         pipeline_id=$(echo $response | jq -r '.id')
         pipeline_url=$(echo $response | jq -r '.web_url')
@@ -42,7 +41,8 @@ jobs:
           exit 1
         fi
         echo "PIPELINE_ID=$pipeline_id" >> $GITHUB_ENV
-        echo "PIPELINE_URL=$pipeline_url" >> $GITHUB_ENV        
+        echo "PIPELINE_URL=$pipeline_url" >> $GITHUB_ENV
+      
 
 
 
