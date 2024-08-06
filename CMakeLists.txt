@@ -73,5 +73,5 @@ add_test(NAME pyginkgo_sparse_matrix_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sparse.py)
 add_test(NAME pyginkgo_access_gpu_test
-         COMMAND ${PYTHON_EXECUTABLE} -M pytest
+         COMMAND ${PYTHON_EXECUTABLE} -m pytest
                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gpu_access.py)
