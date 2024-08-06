@@ -30,7 +30,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y libopenmpi-dev
-        pip install pytest numpy
+        pip install pytest numpy torch
 
     - name: Configure CMake
       run: cmake --preset ninja-develop -DGINKGO_BUILD_OMP=OFF
