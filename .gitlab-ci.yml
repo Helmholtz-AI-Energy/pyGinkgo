@@ -1,8 +1,0 @@
-stages:
-  - dummy
-
-dummy_job:
-  stage: dummy
-  script:
-    - echo "This is a dummy job"
-
