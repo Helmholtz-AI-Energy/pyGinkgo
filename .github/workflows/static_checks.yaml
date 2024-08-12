@@ -24,7 +24,7 @@ jobs:
       - name: Install pre-commit and dependencies
         run: |
           pip install pre-commit
-          pip install types-all  # Install types-all explicitly to handle its dependencies
+          pip install mypy types-PyYAML types-requests
 
       - name: Install pre-commit hooks
         run: pre-commit install
