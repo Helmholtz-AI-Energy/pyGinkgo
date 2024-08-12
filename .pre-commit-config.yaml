@@ -3,7 +3,7 @@ repos:
     rev: v1.11.1 # Use the sha / tag you want to point at
     hooks:
       - id: mypy
-        additional_dependencies: [types-all]
+        additional_dependencies: [types-PyYAML, types-requests]
         files: ^(tests|examples)/.*\.py$
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
