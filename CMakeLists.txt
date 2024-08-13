@@ -59,6 +59,21 @@ target_include_directories(pyGinkgo PRIVATE ${Ginkgo_BINARY_DIR}/include)
 target_link_libraries(pyGinkgo PRIVATE Ginkgo::ginkgo)
 set_property(TARGET pyGinkgo PROPERTY CXX_STANDARD 14)
 
+# If we build with shared dependencies for windows, then the dll files should be moved to the folder with .pyd output as per https://stackoverflow.com/a/59873787/8302811
+if(WIN32 AND BUILD_SHARED_LIBS)
+  file(GLOB GINKGO_DLL_OUTPUT ${Ginkgo_BINARY_DIR}/lib/*.dll)
+  add_custom_target(copy_ginkgo_dlls
+    DEPENDS Ginkgo::ginkgo
+  )
+  foreach(dll_i ${GINKGO_DLL_OUTPUT})
+    add_custom_command(
+      TARGET copy_ginkgo_dlls
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${dll_i} $<TARGET_FILE_DIR:pyGinkgo>
+    )
+  endforeach(dll_i)
+  add_dependencies(pyGinkgo copy_ginkgo_dlls)
+endif()
+
 # adding tests
 add_test(NAME pyginkgo_import_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest

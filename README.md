@@ -19,22 +19,36 @@ PyGinkgo is a Python binding for the Ginkgo framework, providing access to Ginkg
 ### Building the module
 
 1. **Clone the repository**:
-2. ```bash
+   ```bash
    git clone https://github.com/Helmholtz-AI-Energy/pyGinkgo.git
    ```
 
-3. **Build using CMake**:
+2. **Build using CMake**:
 
-```bash
-# Make a build directory in the project directory
-mkdir build && cd build
+   ```bash
+   # Make a build directory in the project directory
+   mkdir build && cd build
 
-# Run CMake configuration
-cmake ..
+   # Run CMake configuration
+   cmake ..
 
-# Build the project using the specified number of cores (replace "number of cores" with the desired value)
-cmake --build . -j=number_of_cores
-```
+   # Build the project using the specified number of cores (replace "number of cores" with the desired value)
+   cmake --build . -j=number_of_cores
+   ```
+
+#### Building on Windows
+(That's the notes after the successfull build and passing tests on windows)
+
+* Theoretically PyBind11 requires **Boost** and **pytest** to be installed in system and visible in PATH. It wasn't tested though, whether that's a strong requirement.
+
+* Building of the library is done using the same steps as described above. Yet, during the import of the Python module one might get the `ImportError: DLL load failed while importing pyGinkgo: The specified module could not be found.`. There is a [thread on Stackoverflow](https://stackoverflow.com/questions/59860465/pybind11-importerror-dll-not-found-when-trying-to-import-pyd-in-python-int/78866933) related to this issue, but what worked for me was placing the following `dll`s into the same directory as `pyd` file:
+   * `libdll.dll`
+   * `libgcc_s_seh-1.dll`
+   * `libgomp-1.dll`
+   * `libstdc++-6.dll`
+   * `libwinpthread-1.dll`
+
+   If the Ginkgo library expands the amount of dependencies, as per the [thread](https://stackoverflow.com/questions/59860465/pybind11-importerror-dll-not-found-when-trying-to-import-pyd-in-python-int/78866933) they could be discovered through the Dependency-Walker.
 
 ### Running the tests
 You would need to install pytest to be able to run the tests. To run all tests:
