@@ -54,7 +54,7 @@
       "configurePreset": "msvc-develop",
       "configuration": "RelWithDebInfo",
       "targets": [
-        "all", "pyGinkgo", "debugging_target"
+        "ALL_BUILD", "pyGinkgo", "debugging_target"
       ]
     }
    ]
