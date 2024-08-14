@@ -5,6 +5,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(pyGinkgo)
 
+if(MSVC)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zo")
+endif()
+
 enable_testing()
 
 # Find Python interpreter and library
@@ -59,34 +63,38 @@ target_include_directories(pyGinkgo PRIVATE ${Ginkgo_BINARY_DIR}/include)
 target_link_libraries(pyGinkgo PRIVATE Ginkgo::ginkgo)
 set_property(TARGET pyGinkgo PROPERTY CXX_STANDARD 14)
 
+add_executable(debugging_target ./src/debugging_target.cpp)
+target_include_directories(debugging_target PRIVATE ${Ginkgo_BINARY_DIR}/include)
+target_link_libraries(debugging_target PRIVATE Ginkgo::ginkgo)
+
 # If we build with shared dependencies for windows, then the dll files should be moved to the folder with .pyd output as per https://stackoverflow.com/a/59873787/8302811
 if(WIN32 AND BUILD_SHARED_LIBS)
-  file(GLOB GINKGO_DLL_OUTPUT ${Ginkgo_BINARY_DIR}/lib/*.dll)
   add_custom_target(copy_ginkgo_dlls
     DEPENDS Ginkgo::ginkgo
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different $<TARGET_FILE_DIR:Ginkgo::ginkgo> $<TARGET_FILE_DIR:pyGinkgo>
   )
-  foreach(dll_i ${GINKGO_DLL_OUTPUT})
-    add_custom_command(
-      TARGET copy_ginkgo_dlls
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${dll_i} $<TARGET_FILE_DIR:pyGinkgo>
-    )
-  endforeach(dll_i)
   add_dependencies(pyGinkgo copy_ginkgo_dlls)
+  add_dependencies(debugging_target copy_ginkgo_dlls)
 endif()
 
 # adding tests
 add_test(NAME pyginkgo_import_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
-                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_import.py)
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_import.py
+         WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
 add_test(NAME pyginkgo_array_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
-                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array.py)
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array.py
+         WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
 add_test(NAME pyginkgo_dense_matrix_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
-                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dense.py)
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dense.py
+         WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
 add_test(NAME pyginkgo_sparse_matrix_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
-                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sparse.py)
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sparse.py
+         WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
 add_test(NAME pyginkgo_access_gpu_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
-                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gpu_access.py)
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gpu_access.py
+         WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)

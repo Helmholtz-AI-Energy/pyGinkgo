@@ -16,6 +16,11 @@
       "generator": "Ninja"
     },
     {
+      "name": "msvc",
+      "hidden": true,
+      "generator": "Visual Studio 17 2022"
+    },
+    {
       "name": "ninja-develop",
       "inherits": [
         "develop",
@@ -24,8 +29,17 @@
       "displayName": "Build pyGinkgo bindings",
       "description": "Build pyGinkgo bindings",
       "binaryDir": "${sourceDir}/build/Develop"
+    },
+    {
+      "name": "msvc-develop",
+      "inherits": [
+        "develop",
+        "msvc"
+      ],
+      "displayName": "Build pyGinkgo bindings for Windows",
+      "description": "Build pyGinkgo bindings for Windows",
+      "binaryDir": "${sourceDir}/build/DevelopWindows"
     }
-
   ],
   "buildPresets": [
     {
@@ -33,6 +47,15 @@
       "displayName": "Build for CPUs only with unit tests enabled",
       "configurePreset": "ninja-develop",
       "configuration": "ninja-develop"
+    },
+    {
+      "name": "msvc-develop",
+      "displayName": "Build for CPUs only with unit tests enabled for Windows",
+      "configurePreset": "msvc-develop",
+      "configuration": "RelWithDebInfo",
+      "targets": [
+        "all", "pyGinkgo", "debugging_target"
+      ]
     }
    ]
 }
