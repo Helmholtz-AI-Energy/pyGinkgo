@@ -6,9 +6,6 @@ on:
   pull_request:
     branches: [ main ]
 
-env:
-  CTEST_OUTPUT_ON_FAILURE: 1
-
 jobs:
   trigger_gitlab_ci:
     runs-on: ubuntu-latest
