@@ -6,7 +6,7 @@
 
 namespace py = pybind11;
 
-#define GKO_MATRIX_BINDING(Name)                                               \
+#define GKO_MATRIX_BINDING(Name                                               \
   py::class_<gko::matrix::Name<ValueType>,                                     \
              std::shared_ptr<gko::matrix::Name<ValueType>>, gko::LinOp>(       \
       module_matrix, #Name, py::buffer_protocol())                             \
@@ -30,7 +30,7 @@ namespace py = pybind11;
                                                                                \
         if (data_info.format != py::format_descriptor<ValueType>::format())    \
           throw std::runtime_error(                                            \
-              "Provided values have an incompatible dtype");                   \
+              "Provided values have an incompatible dtyp);                   \
                                                                                \
         if (rows_info.format != py::format_descriptor<IndexType>::format())    \
           throw std::runtime_error(                                            \
