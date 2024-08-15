@@ -148,6 +148,12 @@ void init_dense(py::module_ &module_matrix) {
           );
         }
       })
+      .def(
+          "apply",
+          [](const gko::matrix::Dense<ValueType> &d,
+             std::shared_ptr<const gko::LinOp> b,
+             std::shared_ptr<gko::LinOp> x) { d.apply(b, x); },
+          "")
       .def("scale",
            [](gko::matrix::Dense<ValueType> &m, ValueType s) {
              auto o = gko::matrix::Dense<ValueType>::create(m.get_executor(),
@@ -162,6 +168,9 @@ void init_dense(py::module_ &module_matrix) {
              o->fill(s);
              m.inv_scale(o);
            })
+      .def("fill", &gko::matrix::Dense<ValueType>::fill,
+          "Sets all elements of the matrix to the given value `v`."
+          )
       .def("add_scaled", &gko::matrix::Dense<ValueType>::add_scaled,
            "Adds `b` scaled by `alpha` to the matrix (aka: BLAS axpy).")
       .def("sub_scaled", &gko::matrix::Dense<ValueType>::sub_scaled,
