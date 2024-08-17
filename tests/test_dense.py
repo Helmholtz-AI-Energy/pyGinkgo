@@ -65,7 +65,3 @@ class TestDense:
         filled = pyGinkgo.matrix.dense(self.ref, dense)
         filled.fill(10)
         assert all(filled.at(i) == 10 for i in range(filled.get_num_stored_elements()))
-    
-    # todo
-    # def test_compute_dot(self):
-        
