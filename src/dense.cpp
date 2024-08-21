@@ -241,6 +241,18 @@ void init_dense(py::module_ &module_matrix) {
           ),
           "Computes the column-wise arithmetic mean of this matrix."
       )
+      .def("compute_squared_norm2",
+          py::overload_cast<gko::ptr_param<gko::LinOp>>(
+            &gko::matrix::Dense<ValueType>::compute_squared_norm2, py::const_
+          ),
+          "Computes the square of the column-wise Euclidean (L^2) norm of this matrix."
+      )
+      .def("compute_squared_norm2",
+          py::overload_cast<gko::ptr_param<gko::LinOp>, gko::array<char>&>(
+            &gko::matrix::Dense<ValueType>::compute_squared_norm2, py::const_
+          ),
+          "Computes the square of the column-wise Euclidean (L^2) norm of this matrix."
+      )
       .def("at",
            py::overload_cast<size_t>(
                &gko::matrix::Dense<ValueType>::at, py::const_),
