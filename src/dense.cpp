@@ -169,21 +169,12 @@ void init_dense(py::module_ &module_matrix) {
              m.inv_scale(o);
            })
       .def("fill", &gko::matrix::Dense<ValueType>::fill,
-          "Fill the dense matrix with a given value.")
+          "Sets all elements of the matrix to the given value `v`."
+          )
       .def("add_scaled", &gko::matrix::Dense<ValueType>::add_scaled,
            "Adds `b` scaled by `alpha` to the matrix (aka: BLAS axpy).")
       .def("sub_scaled", &gko::matrix::Dense<ValueType>::sub_scaled,
            "Subtracts `b` scaled by `alpha` from the matrix (aka: BLAS axpy).")
-      //todo1 test `compute_dot`
-      .def("compute_dot", 
-           py::overload_cast<gko::ptr_param<const gko::LinOp>, gko::ptr_param<gko::LinOp>>(
-               &gko::matrix::Dense<ValueType>::compute_dot, py::const_),
-           "Computes the column-wise dot product of this matrix and `b`.")
-      .def("compute_dot", 
-           py::overload_cast<gko::ptr_param<const gko::LinOp>, gko::ptr_param<gko::LinOp>, gko::array<char>&>(
-               &gko::matrix::Dense<ValueType>::compute_dot, py::const_),
-           "Computes the column-wise dot product of this matrix and `b`.")
-      //todo1 end
       .def("at",
            py::overload_cast<size_t>(
                &gko::matrix::Dense<ValueType>::at, py::const_),
