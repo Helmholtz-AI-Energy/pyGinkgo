@@ -66,6 +66,5 @@ class TestDense:
         filled.fill(10)
         assert all(filled.at(i) == 10 for i in range(filled.get_num_stored_elements()))
     
-    # todo
-    # def test_compute_dot(self):
+    # todo test_compute_dot
         
