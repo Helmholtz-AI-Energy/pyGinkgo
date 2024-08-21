@@ -52,19 +52,19 @@ class TestDense:
     def test_dense_support_basic_functionality(self):
         dense = pyGinkgo.matrix.dense(self.ref, (3, 3), np.array([self.values]), 3)
 
-        scaled = pyGinkgo.matrix.dense(self.ref, dense)
-        scaled.scale(5)
-        assert scaled.at(2) == -5.0
-        assert scaled.at(1, 2) == scaled.at(5)
+        dense.scale(5)
+        assert dense.at(2) == -5.0
+        assert dense.at(1, 2) == dense.at(5)
 
-        inv_scaled = pyGinkgo.matrix.dense(self.ref, dense)
-        inv_scaled.inv_scale(5)
-        assert inv_scaled.at(2) == -1.0
-        assert inv_scaled.at(1, 2) == inv_scaled.at(5)
+        dense.inv_scale(5)
+        assert dense.at(2) == -1.0
+        assert dense.at(1, 2) == dense.at(5)
 
-        filled = pyGinkgo.matrix.dense(self.ref, dense)
-        filled.fill(10)
-        assert all(filled.at(i) == 10 for i in range(filled.get_num_stored_elements()))
+    def test_dense_fill(self):
+        dense = pyGinkgo.matrix.dense(self.ref, (3, 3), np.array([self.values]), 3)
+
+        dense.fill(10)
+        assert all(dense.at(i) == 10 for i in range(dense.get_num_stored_elements()))
     
     # todo test_compute_dot
         
