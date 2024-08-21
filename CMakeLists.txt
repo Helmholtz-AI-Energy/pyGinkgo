@@ -65,6 +65,6 @@ add_test(NAME pyginkgo_import_test
 add_test(NAME pyginkgo_array_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array.py)
-add_test(NAME pyginkgo_matrix_test
+add_test(NAME pyginkgo_dense_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dense.py)
