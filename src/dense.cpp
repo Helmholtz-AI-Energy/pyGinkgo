@@ -182,6 +182,14 @@ void init_dense(py::module_ &module_matrix) {
            py::overload_cast<gko::ptr_param<const gko::LinOp>, gko::ptr_param<gko::LinOp>, gko::array<char>&>(
                &gko::matrix::Dense<ValueType>::compute_dot, py::const_),
            "Computes the column-wise dot product of this matrix and `b`.")
+      .def("compute_conj_dot",
+          py::overload_cast<gko::ptr_param<const gko::LinOp>, gko::ptr_param<gko::LinOp>>(
+            &gko::matrix::Dense<ValueType>::compute_conj_dot, py::const_),
+          "Computes the column-wise dot product of `conj(this matrix)` and `b`.")
+      .def("compute_conj_dot",
+          py::overload_cast<gko::ptr_param<const gko::LinOp>, gko::ptr_param<gko::LinOp>, gko::array<char>&>(
+               &gko::matrix::Dense<ValueType>::compute_conj_dot, py::const_),
+           "Computes the column-wise dot product of this matrix and `b`.")
       .def("at",
            py::overload_cast<size_t>(
                &gko::matrix::Dense<ValueType>::at, py::const_),
