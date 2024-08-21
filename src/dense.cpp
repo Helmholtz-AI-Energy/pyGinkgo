@@ -229,6 +229,18 @@ void init_dense(py::module_ &module_matrix) {
           ),
           "Computes the column-wise (L^1) norm of this matrix."
       )
+      .def("compute_mean",
+          py::overload_cast<gko::ptr_param<gko::LinOp>>(
+            &gko::matrix::Dense<ValueType>::compute_mean, py::const_
+          ),
+          "Computes the column-wise arithmetic mean of this matrix."
+      )
+      .def("compute_mean",
+          py::overload_cast<gko::ptr_param<gko::LinOp>, gko::array<char>&>(
+            &gko::matrix::Dense<ValueType>::compute_mean, py::const_
+          ),
+          "Computes the column-wise arithmetic mean of this matrix."
+      )
       .def("at",
            py::overload_cast<size_t>(
                &gko::matrix::Dense<ValueType>::at, py::const_),
