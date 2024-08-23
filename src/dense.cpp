@@ -88,12 +88,14 @@ void init_dense(py::module_ &module_matrix) {
       .def("__repr__",
            [](const gko::matrix::Dense<ValueType> &o) {
              auto str = std::string("pygko.matrix.Dense object of size ");
-             auto elems = o.get_num_stored_elements();
+             // explicit type of the integer, not to mess up the convertion in future
+             gko::size_type elems = o.get_num_stored_elements();
              str += std::to_string(elems);
              if (o.get_executor() == o.get_executor()->get_master()) {
                str += " on host";
                if (elems < 10) {
                  str += " [ ";
+                 // int could be used here, as we only have up to 10 elements
                  for (int i = 0; i < elems; i++) {
                    str += std::to_string(o.at(i));
                    str += " ";

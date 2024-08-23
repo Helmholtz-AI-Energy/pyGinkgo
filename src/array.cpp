@@ -9,7 +9,8 @@ namespace py = pybind11;
 
 void init_array(py::module_ &module) {
   py::class_<gko::array<ValueType>>(module, "array", py::buffer_protocol())
-      .def(py::init<std::shared_ptr<const gko::Executor>, int>())
+      // We have IndexType here as a second parameter, 
+      //    as should be capable to take value <= size of array
       .def(py::init<std::shared_ptr<const gko::Executor>,
                     gko::array<ValueType> &>())
       .def(py::init(

@@ -21,8 +21,12 @@ PYBIND11_MODULE(pyGinkgo, m) {
   py::class_<gko::dim<2>>(m, "dim2").def(
       py::init<unsigned long, unsigned long>());
 
+  // Docs on usage of shared_ptr here:
+  //    https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#std-shared-ptr
   py::class_<gko::Executor, std::shared_ptr<gko::Executor>>(m, "Executor");
 
+  // Docs on usage of several types here (virtual functions override):
+  //    https://pybind11.readthedocs.io/en/stable/advanced/classes.html#overriding-virtual-functions-in-python
   py::class_<gko::detail::ExecutorBase<gko::OmpExecutor>, gko::Executor,
              std::shared_ptr<gko::detail::ExecutorBase<gko::OmpExecutor>>>(
       m, "OmpExecutorBase");
