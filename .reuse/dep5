@@ -38,3 +38,11 @@ License: MIT
 Files: *.toml
 Copyright: 2024 pyGinkgo authors
 License: MIT
+
+Files: examples/*.ipynb
+Copyright: 2024 pyGinkgo authors
+License: MIT
+
+Files: examples/*.mtx
+Copyright: 2024 pyGinkgo authors
+License: MIT
