@@ -1,5 +1,6 @@
 {
     "python.analysis.extraPaths": [
-        "${workspaceFolder}/build/Develop"
+        "${workspaceFolder}/build/Develop",
+        "${workspaceFolder}/build/DevelopWSL"
     ]
 }

@@ -16,11 +16,6 @@
       "generator": "Ninja"
     },
     {
-      "name": "msvc",
-      "hidden": true,
-      "generator": "Visual Studio 17 2022"
-    },
-    {
       "name": "ninja-develop",
       "inherits": [
         "develop",
@@ -29,6 +24,13 @@
       "displayName": "Build pyGinkgo bindings",
       "description": "Build pyGinkgo bindings",
       "binaryDir": "${sourceDir}/build/Develop"
+    },
+
+
+    {
+      "name": "msvc",
+      "hidden": true,
+      "generator": "Visual Studio 17 2022"
     },
     {
       "name": "msvc-develop",
@@ -39,6 +41,24 @@
       "displayName": "Build pyGinkgo bindings for Windows",
       "description": "Build pyGinkgo bindings for Windows",
       "binaryDir": "${sourceDir}/build/DevelopWindows"
+    },
+    {
+      "name": "wsl_makefiles",
+      "hidden": true,
+      "generator": "Unix Makefiles"
+    },
+    {
+      "name": "wsl_makefiles-develop",
+      "inherits": [
+        "develop",
+        "wsl_makefiles"
+      ],
+      "displayName": "Build pyGinkgo bindings for Windows WSL",
+      "description": "Build pyGinkgo bindings for Windows WSL",
+      "binaryDir": "${sourceDir}/build/DevelopWSL",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     }
   ],
   "buildPresets": [
@@ -48,6 +68,8 @@
       "configurePreset": "ninja-develop",
       "configuration": "ninja-develop"
     },
+
+
     {
       "name": "msvc-develop",
       "displayName": "Build for CPUs only with unit tests enabled for Windows",
@@ -56,6 +78,15 @@
       "targets": [
         "ALL_BUILD", "pyGinkgo", "debugging_target"
       ]
+    },
+    {
+      "name": "wsl_makefiles-develop-debug",
+      "displayName": "Build for CPUs only with unit tests enabled for WSL",
+      "configurePreset": "wsl_makefiles-develop",
+      "targets": [
+        "all", "pyGinkgo", "debugging_target"
+      ],
+      "jobs": 10
     }
    ]
 }
