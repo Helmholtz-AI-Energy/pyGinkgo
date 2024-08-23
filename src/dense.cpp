@@ -53,7 +53,7 @@ void init_dense(py::module_ &module_matrix) {
             exec, gko::dim<2>{dim[0].cast<size_t>(), dim[1].cast<size_t>()}));
       }))
       .def(py::init([](std::shared_ptr<gko::Executor> exec, py::tuple dim,
-                       int stride) {
+                       IndexType stride) {
         return gko::share(gko::matrix::Dense<ValueType>::create(
             exec, gko::dim<2>{dim[0].cast<gko::size_type>(), dim[1].cast<gko::size_type>()}, stride));
       }))

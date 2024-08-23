@@ -19,7 +19,7 @@ PYBIND11_MODULE(pyGinkgo, m) {
   py::class_<gko::ptr_param<gko::LinOp>>(m, "ptr_param");
 
   py::class_<gko::dim<2>>(m, "dim2").def(
-      py::init<unsigned long, unsigned long>());
+      py::init<gko::size_type, gko::size_type>());
 
   // Docs on usage of shared_ptr here:
   //    https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#std-shared-ptr

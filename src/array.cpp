@@ -11,13 +11,13 @@ void init_array(py::module_ &module) {
   py::class_<gko::array<ValueType>>(module, "array", py::buffer_protocol())
       // We have IndexType here as a second parameter, 
       //    as should be capable to take value <= size of array
+      .def(py::init<std::shared_ptr<const gko::Executor>, IndexType>())
       .def(py::init<std::shared_ptr<const gko::Executor>,
                     gko::array<ValueType> &>())
       .def(py::init(
           [](std::shared_ptr<gko::Executor> exec,
-             py::array_t<double, py::array::c_style | py::array::forcecast> b) {
+             py::array_t<ValueType, py::array::c_style | py::array::forcecast> b) {
             // for documentation of the second argument see
-            // see
             // https://pybind11.readthedocs.io/en/stable/advanced/pycpp/numpy.html#arrays
             /* Request a buffer descriptor from Python */
             py::buffer_info info = b.request();
@@ -51,7 +51,7 @@ void init_array(py::module_ &module) {
       })
       .def("fill", &gko::array<ValueType>::fill,
            "Fill the array with the given value.")
-      .def("get_size", &gko::array<ValueType>::get_num_elems)
+      .def("get_size", &gko::array<ValueType>::get_size)
       .def("at", [](const gko::array<ValueType> &arr, int idx) {
         return arr.get_const_data()[idx];
       });
