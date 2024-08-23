@@ -90,3 +90,12 @@ class TestDense:
         result = pyGinkgo.matrix.dense(self.ref, (1, 1))
         dense_a.apply(dense_b, result)
         result.at(0) == aT.dot(a)[0, 0]
+
+    def test_dense_fill(self):
+        dense = pyGinkgo.matrix.dense(self.ref, (3, 3), np.array([self.values]), 3)
+
+        dense.fill(10)
+        assert all(dense.at(i) == 10 for i in range(dense.get_num_stored_elements()))
+    
+    # todo test_compute_dot
+        
