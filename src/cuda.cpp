@@ -18,9 +18,8 @@ void add_cuda_executor_class(py::module_ &root_module)
                 std::shared_ptr<gko::CudaAllocatorBase> alloc,
                 std::shared_ptr<gko::cuda_stream> stream)
             {
-                // Cannot pass the stream argument,
                 return gko::CudaExecutor::create(
-                    dev_id, master, std::make_shared<gko::CudaAllocator>(), nullptr);
+                    dev_id, master, alloc, stream->get());
             }),
             py::arg("device_id"),
             py::arg("master"),
