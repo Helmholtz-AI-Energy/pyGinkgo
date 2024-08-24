@@ -1,0 +1,17 @@
+// Source of the debugging configuration: https://stackoverflow.com/a/62013281
+// The link was found here: https://github.com/pybind/pybind11/issues/1931#issuecomment-693378014
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Attach",
+            "type": "lldb",
+            "request": "attach",
+            "program": "python3",
+            "pid": "${command:pickProcess}"
+        },
+    ]
+}
