@@ -30,6 +30,10 @@ PYBIND11_MODULE(pyGinkgo, m) {
 
     // Docs on usage of shared_ptr here:
     //     https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#std-shared-ptr
+    //
+    // Despite inability to instansiate this (and the following) class in Python,
+    //    we still need to declare it for Pybind11 to be able to map Python object
+    //    to C++ object
     py::class_<gko::Executor, std::shared_ptr<gko::Executor>>(m, "Executor");
 
     // Docs on usage of several types here (virtual functions override):
