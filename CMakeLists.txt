@@ -55,9 +55,15 @@ if(NOT ginkgo_FOUND)
 endif()
 
 pybind11_add_module(
-  pyGinkgo ${PROJECT_SOURCE_DIR}/src/python.cpp
-  ${PROJECT_SOURCE_DIR}/src/array.cpp ${PROJECT_SOURCE_DIR}/src/dense.cpp
-  ${PROJECT_SOURCE_DIR}/src/matrix.cpp)
+  pyGinkgo
+  ${PROJECT_SOURCE_DIR}/src/python.cpp
+  ${PROJECT_SOURCE_DIR}/src/array.cpp
+  ${PROJECT_SOURCE_DIR}/src/dense.cpp
+  ${PROJECT_SOURCE_DIR}/src/matrix.cpp
+  ${PROJECT_SOURCE_DIR}/src/cuda.cpp
+  ${PROJECT_SOURCE_DIR}/src/memory.cpp
+  ${PROJECT_SOURCE_DIR}/src/stream.cpp
+)
 
 target_include_directories(pyGinkgo PRIVATE ${Ginkgo_BINARY_DIR}/include)
 target_link_libraries(pyGinkgo PRIVATE Ginkgo::ginkgo)
@@ -97,4 +103,8 @@ add_test(NAME pyginkgo_sparse_matrix_test
 add_test(NAME pyginkgo_access_gpu_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gpu_access.py
+         WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
+add_test(NAME pyginkgo_sparse_cuda_test
+         COMMAND ${PYTHON_EXECUTABLE} -m pytest
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sparse_cuda.py
          WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
