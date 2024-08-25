@@ -51,6 +51,7 @@ PyGinkgo is a Python binding for the Ginkgo framework, providing access to Ginkg
    * `libwinpthread-1.dll`
 
    If the Ginkgo library expands the amount of dependencies, as per the [thread](https://stackoverflow.com/questions/59860465/pybind11-importerror-dll-not-found-when-trying-to-import-pyd-in-python-int/78866933) they could be discovered through the Dependency-Walker.
+   Debugging could also be used to determine which dlls are being accessed (and failed to be located).
 
 ### Running the tests
 You would need to install pytest to be able to run the tests. To run all tests:
