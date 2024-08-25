@@ -13,6 +13,8 @@ PyGinkgo is a Python binding for the Ginkgo framework, providing access to Ginkg
 ### Prerequisites
 
 - Python 3.x
+   - [pytest](https://github.com/pytest-dev/pytest) - to execute the tests
+   - [mypy](https://github.com/python/mypy/blob/fe15ee69b9225f808f8ed735671b73c31ae1bed8/docs/source/stubgen.rst) - to generate library interface files for autocomplete
 - Ginkgo
 - Pybind11
 

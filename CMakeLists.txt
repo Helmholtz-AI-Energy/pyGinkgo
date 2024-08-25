@@ -83,6 +83,13 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   add_dependencies(debugging_target copy_ginkgo_dlls)
 endif()
 
+# Generating stubs for the library (interface annotation) as per https://mypy.readthedocs.io/en/stable/stubgen.html#specifying-what-to-stub
+add_custom_command(
+  TARGET pyGinkgo POST_BUILD
+  WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>
+  VERBATIM COMMAND ${PYTHON_EXECUTABLE} -c "import mypy.stubgen;mypy.stubgen.main([\'-p\',\'pyGinkgo\',\'-o\',\'.\',\'--include-private\'])"
+)
+
 # adding tests
 add_test(NAME pyginkgo_import_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
