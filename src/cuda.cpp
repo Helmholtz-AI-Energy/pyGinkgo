@@ -21,9 +21,24 @@ void add_cuda_executor_class(py::module_ &root_module)
                 return gko::CudaExecutor::create(
                     dev_id, master, alloc, stream->get());
             }),
-            py::arg("device_id"),
-            py::arg("master"),
+            // The first two are the deviation from the original library
+            py::arg("device_id") = 0,
+            py::arg("master") = gko::ReferenceExecutor::create(),
             py::arg("allocator") = std::make_shared<gko::CudaAllocator>(),
             py::arg("stream") = std::make_shared<gko::cuda_stream>()
-        );
+        )
+        
+        .def_property_readonly("master",
+            [](std::shared_ptr<gko::CudaExecutor> self)
+                -> std::shared_ptr<gko::Executor>
+            // Hopefully there would be no problems with converting val to lval
+            { return self->get_master(); }
+        )
+
+        .def_property_readonly("device_id",
+            &gko::CudaExecutor::get_device_id)
+
+        .def_property_readonly("num_devices",
+            &gko::CudaExecutor::get_num_devices)
+        ;
 }
