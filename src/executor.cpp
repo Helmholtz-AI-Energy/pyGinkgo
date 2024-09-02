@@ -55,7 +55,7 @@ void add_executor_classes(py::module_ &root_module)
         .def_property_readonly("device_id",
             &gko::CudaExecutor::get_device_id)
 
-        .def_property_readonly("num_devices",
+        .def_static("get_num_devices",
             &gko::CudaExecutor::get_num_devices)
         ;
 }
