@@ -10,6 +10,9 @@ void init_array(py::module_ &);
 void init_dense(py::module_ &);
 void init_coo(py::module_ &);
 void init_csr(py::module_ &);
+void add_allocator_classes(py::module_ &);
+void add_stream_classes(py::module_ &);
+void add_executor_classes(py::module_ &);
 
 PYBIND11_MODULE(pyGinkgo, m) {
   m.doc() = "Python bindings for the Ginkgo framework";
@@ -21,19 +24,9 @@ PYBIND11_MODULE(pyGinkgo, m) {
   py::class_<gko::dim<2>>(m, "dim2").def(
       py::init<unsigned long, unsigned long>());
 
-  py::class_<gko::Executor, std::shared_ptr<gko::Executor>>(m, "Executor");
-
-  py::class_<gko::detail::ExecutorBase<gko::OmpExecutor>, gko::Executor,
-             std::shared_ptr<gko::detail::ExecutorBase<gko::OmpExecutor>>>(
-      m, "OmpExecutorBase");
-
-  py::class_<gko::OmpExecutor, gko::detail::ExecutorBase<gko::OmpExecutor>,
-             std::shared_ptr<gko::OmpExecutor>>(m, "OmpExecutor")
-      .def(py::init([]() { return gko::OmpExecutor::create(); }));
-
-  py::class_<gko::ReferenceExecutor, gko::OmpExecutor,
-             std::shared_ptr<gko::ReferenceExecutor>>(m, "ReferenceExecutor")
-      .def(py::init([]() { return gko::ReferenceExecutor::create(); }));
+  add_allocator_classes(m);
+  add_stream_classes(m);
+  add_executor_classes(m);
 
   py::module_ module_base =
       m.def_submodule("base", "Submodule for Ginkgos low level type bindings");

@@ -51,27 +51,53 @@ if(NOT ginkgo_FOUND)
 endif()
 
 pybind11_add_module(
-  pyGinkgo ${PROJECT_SOURCE_DIR}/src/python.cpp
-  ${PROJECT_SOURCE_DIR}/src/array.cpp ${PROJECT_SOURCE_DIR}/src/dense.cpp
-  ${PROJECT_SOURCE_DIR}/src/matrix.cpp)
+  pyGinkgo
+  ${PROJECT_SOURCE_DIR}/src/python.cpp
+  ${PROJECT_SOURCE_DIR}/src/array.cpp
+  ${PROJECT_SOURCE_DIR}/src/dense.cpp
+  ${PROJECT_SOURCE_DIR}/src/matrix.cpp
+  ${PROJECT_SOURCE_DIR}/src/memory.cpp
+  ${PROJECT_SOURCE_DIR}/src/stream.cpp
+  ${PROJECT_SOURCE_DIR}/src/executor.cpp
+)
 
 target_include_directories(pyGinkgo PRIVATE ${Ginkgo_BINARY_DIR}/include)
 target_link_libraries(pyGinkgo PRIVATE Ginkgo::ginkgo)
 set_property(TARGET pyGinkgo PROPERTY CXX_STANDARD 14)
 
+add_executable(debugging_target ./src/debugging_target.cpp)
+target_include_directories(debugging_target PRIVATE ${Ginkgo_BINARY_DIR}/include)
+target_link_libraries(debugging_target PRIVATE Ginkgo::ginkgo)
+
+# Generating stubs for the library (interface annotation) as per https://mypy.readthedocs.io/en/stable/stubgen.html#specifying-what-to-stub
+add_custom_command(
+  TARGET pyGinkgo POST_BUILD
+  WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>
+  VERBATIM COMMAND ${PYTHON_EXECUTABLE} -c "import mypy.stubgen;mypy.stubgen.main([\'-p\',\'pyGinkgo\',\'-o\',\'.\',\'--include-private\'])"
+)
+
 # adding tests
 add_test(NAME pyginkgo_import_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
-                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_import.py)
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_import.py
+         WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
 add_test(NAME pyginkgo_array_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
-                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array.py)
-add_test(NAME pyginkgo_dense_matrix_test
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array.py
+         WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
+add_test(NAME pyginkgo_dense_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
-                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dense.py)
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dense.py
+         WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
 add_test(NAME pyginkgo_sparse_matrix_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
-                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sparse.py)
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sparse.py
+         WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
 add_test(NAME pyginkgo_access_gpu_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
-                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gpu_access.py)
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gpu_access.py
+         WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
+# add_test(NAME pyginkgo_sparse_cuda_test
+#          COMMAND ${PYTHON_EXECUTABLE} -m pytest
+#                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sparse_cuda.py
+#          WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
