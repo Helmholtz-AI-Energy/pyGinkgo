@@ -93,11 +93,7 @@ add_test(NAME pyginkgo_sparse_matrix_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sparse.py
          WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
-add_test(NAME pyginkgo_access_gpu_test
+add_test(NAME pyginkgo_cuda_executor_test
          COMMAND ${PYTHON_EXECUTABLE} -m pytest
-                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gpu_access.py
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cuda_executor.py
          WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
-# add_test(NAME pyginkgo_sparse_cuda_test
-#          COMMAND ${PYTHON_EXECUTABLE} -m pytest
-#                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sparse_cuda.py
-#          WORKING_DIRECTORY $<TARGET_FILE_DIR:pyGinkgo>)
