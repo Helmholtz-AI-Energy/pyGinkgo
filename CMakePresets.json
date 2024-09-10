@@ -57,7 +57,29 @@
       "description": "Build pyGinkgo bindings for Windows WSL",
       "binaryDir": "${sourceDir}/build/DevelopWSL",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "GINKGO_BUILD_CUDA": "ON",
+        "GINKGO_BUILD_HIP": "OFF",
+        "GINKGO_BUILD_MPI": "OFF",
+        "GINKGO_DPCPP_SINGLE_MODE": "OFF"
+      }
+    },
+    {
+      "name": "wsl_dpcpp_makefiles-develop",
+      "inherits": [
+        "develop",
+        "wsl_makefiles"
+      ],
+      "displayName": "Build pyGinkgo bindings for DPCPP on Windows WSL",
+      "description": "Build pyGinkgo bindings for DPCPP on Windows WSL",
+      "binaryDir": "${sourceDir}/build/DevelopWSL_DPCPP",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "/opt/intel/oneapi/compiler/2024.2/bin/icpx",
+        "GINKGO_BUILD_CUDA": "OFF",
+        "GINKGO_BUILD_HIP": "OFF",
+        "GINKGO_BUILD_MPI": "OFF",
+        "GINKGO_DPCPP_SINGLE_MODE": "ON"
       }
     }
   ],
@@ -87,6 +109,12 @@
         "all", "pyGinkgo", "debugging_target"
       ],
       "jobs": 10
+    },
+    {
+      "name": "wsl_dpcpp_makefiles-develop-debug",
+      "displayName": "Build for DPCPP with unit tests enabled for WSL",
+      "configurePreset": "wsl_dpcpp_makefiles-develop",
+      "inherits": ["wsl_makefiles-develop-debug"]
     }
    ]
 }
