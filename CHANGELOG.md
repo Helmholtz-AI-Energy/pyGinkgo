@@ -1,4 +1,5 @@
 # Version 0.1.0 (unreleased)
+- Add GMRES solver bindings [#51](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/51)
 - Add simplified CMakePresets [#49](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/49)
 - Split library into pure bindings and user facing python part [#37](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/37)
 - Add arrays for ints and floats [#37](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/37)
