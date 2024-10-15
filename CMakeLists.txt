@@ -64,7 +64,8 @@ pybind11_add_module(
   ${PROJECT_SOURCE_DIR}/src/cpp_bindings/matrix.cpp
   ${PROJECT_SOURCE_DIR}/src/cpp_bindings/memory.cpp
   ${PROJECT_SOURCE_DIR}/src/cpp_bindings/stream.cpp
-  ${PROJECT_SOURCE_DIR}/src/cpp_bindings/executor.cpp)
+  ${PROJECT_SOURCE_DIR}/src/cpp_bindings/executor.cpp
+  ${PROJECT_SOURCE_DIR}/src/cpp_bindings/solver/gmres.cpp)
 
 target_include_directories(pyGinkgoBindings
                            PRIVATE ${Ginkgo_BINARY_DIR}/include)
