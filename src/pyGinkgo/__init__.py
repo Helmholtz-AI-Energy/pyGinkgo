@@ -5,3 +5,4 @@
 from .pyGinkgoBindings import *
 
 from .core import *
+from .solver import *
