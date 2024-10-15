@@ -24,6 +24,23 @@ void init_gmres(py::module_ &module_solver)
                     .on(exec));
             return gko::share(fact->generate(system_matrix));
         }))
+        .def(py::init([](std::shared_ptr<gko::Executor> exec,
+                         std::shared_ptr<const gko::LinOp> system_matrix,
+                         std::shared_ptr<const gko::LinOp> preconditioner,
+                         size_t max_iters, size_t krylov_dim,
+                         ValueType reduction_factor) {
+            auto fact = gko::share(
+                gko::solver::Gmres<ValueType>::build()
+                    .with_criteria(
+                        gko::stop::Iteration::build().with_max_iters(max_iters),
+                        gko::stop::ResidualNorm<ValueType>::build()
+                            .with_baseline(gko::stop::mode::rhs_norm)
+                            .with_reduction_factor(reduction_factor))
+                    .with_krylov_dim(krylov_dim)
+                    .with_generated_preconditioner(preconditioner)
+                    .on(exec));
+            return gko::share(fact->generate(system_matrix));
+        }))
         .def("__repr__",
              [](const gko::solver::Gmres<ValueType> &o) {
                  auto str = std::string("pygko.solver.Gmres object");
