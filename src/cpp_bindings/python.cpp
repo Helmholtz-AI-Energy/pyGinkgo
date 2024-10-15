@@ -37,11 +37,11 @@ PYBIND11_MODULE(pyGinkgoBindings, m)
     py::module_ module_matrix =
         m.def_submodule("matrix", "Submodule for Ginkgos matrix type bindings");
 
-  init_dense(module_matrix);
-  init_coo(module_matrix);
-  init_csr(module_matrix);
+    init_dense(module_matrix);
+    init_coo(module_matrix);
+    init_csr(module_matrix);
 
-  py::module_ module_solver =
-      m.def_submodule("solver", "Submodule for Ginkgos solver type bindings");
-  init_gmres(module_solver);
+    py::module_ module_solver =
+        m.def_submodule("solver", "Submodule for Ginkgos solver type bindings");
+    init_gmres(module_solver);
 }
