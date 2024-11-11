@@ -69,7 +69,6 @@ if(GINKGO_BUILD_CUDA)
 endif()
 
 add_subdirectory(src/cpp_bindings)
-
 pybind11_add_module(pyGinkgoBindings ${PYGINKGO_CPP_SOURCES})
 
 target_include_directories(pyGinkgoBindings
