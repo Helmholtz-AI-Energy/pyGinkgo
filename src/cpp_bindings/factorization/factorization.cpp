@@ -20,5 +20,9 @@ void init_factorization(py::module_ &module_factorization)
                 gko::experimental::factorization::Factorization<
                     ValueType,
                     IndexType>::create_from_combined_ldu(mtx->clone()));
-        }));
+        }))
+        .def("get_lower_factor",
+             &gko::experimental::factorization::Factorization<
+                 ValueType, IndexType>::get_lower_factor,
+             "");
 }
