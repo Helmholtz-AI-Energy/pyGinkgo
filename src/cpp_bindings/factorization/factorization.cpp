@@ -24,5 +24,5 @@ void init_factorization(py::module_ &module_factorization)
         .def("get_lower_factor",
              &gko::experimental::factorization::Factorization<
                  ValueType, IndexType>::get_lower_factor,
-             "");
+             "Returns lower factors");
 }
