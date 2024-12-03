@@ -11,7 +11,7 @@ void init_factorization(py::module_ &module_factorization)
         gko::experimental::factorization::Factorization<ValueType, IndexType>,
         std::shared_ptr<gko::experimental::factorization::Factorization<
             ValueType, IndexType>>,
-        gko::LinOp>(module_factorization, "Factorization")
+        gko::LinOp>(module_factorization, "factorization")
         .def(py::init([](std::shared_ptr<gko::Executor> exec,
                          std::shared_ptr<const gko::LinOp> system_matrix) {
             auto mtx =

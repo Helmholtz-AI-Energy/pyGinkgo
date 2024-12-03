@@ -17,4 +17,5 @@ class TestFactorizationBinding:
         dense = pgb.matrix.dense(self.ref, np.array(self.values))
         factorization = pgb.factorization.Factorization(self.ref, dense)
         lower = factorization.get_lower_factor()
-        assert True
+        lower_np = np.array(lower)
+        assert lower_np == np.array(self.values)

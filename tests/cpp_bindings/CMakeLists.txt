@@ -30,6 +30,11 @@ add_test(
   COMMAND ${PYTHON_EXECUTABLE} -m pytest
           ${CMAKE_CURRENT_SOURCE_DIR}/test_solver.py
   WORKING_DIRECTORY ${PYGINKGO_TESTS_WORK_DIR})
+add_test(
+  NAME pyginkgo_bindings_factorization_test
+  COMMAND ${PYTHON_EXECUTABLE} -m pytest
+          ${CMAKE_CURRENT_SOURCE_DIR}/test_factorization.py
+  WORKING_DIRECTORY ${PYGINKGO_TESTS_WORK_DIR})
 
 # add CUDA specific tests, if building with CUDA enabled
 if(GINKGO_BUILD_CUDA)
