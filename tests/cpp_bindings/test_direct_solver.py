@@ -12,11 +12,7 @@ import pyGinkgo.pyGinkgoBindings as pgb
 class TestIterativeSolverBinding:
     ref = pgb.ReferenceExecutor()
 
-    solver_args = {
-        "direct": {
-            "factorization": "Cholesky" 
-        }
-    }
+    solver_args = {"direct": {"factorization": "Cholesky"}}
 
     def test_unpreconditioned_solver(self, solver_name):
         reader = getattr(pgb.matrix, "read_Coo")
