@@ -9,7 +9,7 @@ import pyGinkgo.pyGinkgoBindings as pgb
 
 
 @pytest.mark.parametrize("solver_name", ["gmres"])
-class TestSolverBinding:
+class TestIterativeSolverBinding:
     ref = pgb.ReferenceExecutor()
 
     solver_args = {
@@ -18,7 +18,7 @@ class TestSolverBinding:
             "max_iters": 1000,
             "tolerance": 1e-06,
             "relative_stop_mode": False,
-        }
+        },
     }
 
     def test_unpreconditioned_solver(self, solver_name):
