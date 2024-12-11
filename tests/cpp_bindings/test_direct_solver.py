@@ -10,7 +10,7 @@ import pyGinkgo.pyGinkgoBindings as pgb
 
 
 @pytest.mark.parametrize("solver_name", ["direct"])
-class TestIterativeSolverBinding:
+class TestDirectSolverBinding:
     ref = pgb.ReferenceExecutor()
     values = [1., 0., 0., 0., 2., 0., 0., 0., 3.]
     mtx = pgb.matrix.dense(ref, (3, 3), np.array(values), 3)
@@ -19,13 +19,11 @@ class TestIterativeSolverBinding:
 
     solver_args = {"direct": {"factorization": "Cholesky"}}
 
-    def test_unpreconditioned_solver(self, solver_name):
+    def test_direct_solver(self, solver_name):
         solver_ctr = getattr(pgb.solver, solver_name)
         args = self.solver_args[solver_name]
         solver = solver_ctr(exec=self.ref, system_matrix=self.mtx, **args)
 
-        #dim = self.mtx.get_size()
-        #assert dim[0] == dim[1]
         rhs = pgb.matrix.dense(self.mtx.get_executor(), (self.dim[0], 1))
         rhs.fill(1.0)
         x = pgb.matrix.dense(self.mtx.get_executor(), (self.dim[0], 1))
