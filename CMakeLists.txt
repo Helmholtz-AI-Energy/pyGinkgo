@@ -86,9 +86,10 @@ target_link_libraries(pyGinkgoBindings PRIVATE Ginkgo::ginkgo)
 target_link_libraries(pyGinkgoBindings PUBLIC nlohmann_json::nlohmann_json)
 set_property(TARGET pyGinkgoBindings PROPERTY CXX_STANDARD 14)
 
-# Disable problematic warnings from GCC (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=115824)
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+# Disable false postive warnings from GCC (>= 12.4 and < 13)(https://gcc.gnu.org/bugzilla/show_bug.cgi?id=115824 and https://github.com/pybind/pybind11/issues/5224)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12.4.0 AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13.0.0)
   target_compile_options(pyGinkgoBindings PRIVATE -Wno-array-bounds -Wno-stringop-overread)
+  message(WARNING "GCC >= 12.4.0 < 13 gives false positive warning, so we need to add `-Wno-array-bounds -Wno-stringop-overread`. Please refer to https://github.com/pybind/pybind11/issues/5224 for more details.")
 endif()
 
 # Generating stubs for the library (interface annotation) using
