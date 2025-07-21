@@ -86,6 +86,11 @@ target_link_libraries(pyGinkgoBindings PRIVATE Ginkgo::ginkgo)
 target_link_libraries(pyGinkgoBindings PUBLIC nlohmann_json::nlohmann_json)
 set_property(TARGET pyGinkgoBindings PROPERTY CXX_STANDARD 14)
 
+# Disable problematic warnings from GCC (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=115824)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  target_compile_options(pyGinkgoBindings PRIVATE -Wno-array-bounds -Wno-stringop-overread)
+endif()
+
 # Generating stubs for the library (interface annotation) using
 # https://github.com/sizmailov/pybind11-stubgen Thus this library should be
 # first installed before enabling the generation
