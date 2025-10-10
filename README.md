@@ -146,7 +146,3 @@ A.apply (b , x )
 ## Benchmarking
 
 The benchmarking results are presented in our [pyGinkgo publication on arXiv](https://arxiv.org/abs/2510.08230).
-
-
-
-
