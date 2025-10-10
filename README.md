@@ -117,6 +117,36 @@ This will generate the stubs for the C++ code in the `pyGinkgoBindings` module i
 
 ## Usage
 
-Here's a simple example demonstrating how to use PyGinkgo to perform matrix-vector multiplication:
+Usage examples can be found in [examples](examples) directory. Here's a simple example demonstrating how to use pyGinkgo to perform sparse matrix-vector multiplication:
+
+```
+import pyGinkgo as pg
+import numpy as np
+
+# Device initialization
+dev = pg.device ( "cuda" )
+
+# Initialize matrix and tensors
+fn = 'm1.mtx'
+
+A = pg.read ( device = dev , path = fn , dtype = "double" , format = "Csr" )
+n_rows = A.shape[0]
+
+b = pg.as_tensor (
+device = dev , dim =( n_rows ,1) , dtype = "double" , fill =1.0)
+
+x = pg.as_tensor (
+device = dev , dim =( n_rows ,1) , dtype = "double" , fill =0.0)
+
+# Sparse Matrix Vector Product
+A.apply (b , x )
+
+```
 
 ## Benchmarking
+
+The benchmarking results are presented in our [pyGinkgo publication on arXiv](https://arxiv.org/abs/2510.08230).
+
+
+
+
