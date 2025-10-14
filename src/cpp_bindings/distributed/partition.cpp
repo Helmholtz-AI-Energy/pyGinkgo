@@ -9,8 +9,11 @@
 
 void init_partition(py::module_ &module)
 {
-    py::class_<gko::experimental::mpi::communicator>(module, "Communicator")
-        .def(py::init([](const MPI_Comm &comm, bool force_host_buffer) {
-            return gko::experimental::mpi::communicator(comm, force_host_buffer)
+    using Partition = gko::experimental::distributed::Partition<int, int>;
+    py::class_<Partition, std::shared_ptr<Partition>>(module, "Partition")
+        .def(py::init([](std::shared_ptr<gko::Executor> exec,
+                         gko::experimental::mpi::communicator comm) {
+            return gko::share(
+                Partition::build_from_global_size_uniform(exec, 1, 1));
         }));
 }
