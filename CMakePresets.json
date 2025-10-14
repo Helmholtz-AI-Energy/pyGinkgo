@@ -11,7 +11,7 @@
       "hidden": true,
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
-         "GINKGO_BUILD_MPI": "OFF"
+         "GINKGO_BUILD_MPI": "ON"
       },
       "generator": "Ninja"
     },

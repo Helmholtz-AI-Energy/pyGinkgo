@@ -8,6 +8,8 @@ project(pyGinkgo)
 include(cmake/AutoEnableDevice.cmake)
 enable_testing()
 
+option(PYGINKGO_WITH_MPI "Build pyGinkgo with MPI support" ON)
+
 # Find Python interpreter and library
 set(Python_FIND_VIRTUALENV "FIRST")
 find_package(Python COMPONENTS Interpreter Development)
@@ -56,6 +58,9 @@ if(NOT ginkgo_FOUND)
   endif()
   if(NOT DEFINED GINKGO_BUILD_EXAMPLES)
     set(GINKGO_BUILD_EXAMPLES OFF)
+  endif()
+  if(NOT DEFINED GINKGO_BUILD_MPI)
+    set(GINKGO_BUILD_MPI ON)
   endif()
   FetchContent_Declare(
     ginkgo
