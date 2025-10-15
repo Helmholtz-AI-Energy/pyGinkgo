@@ -20,5 +20,6 @@ set(PYGINKGO_CPP_SOURCES
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/distributed/communicator.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/distributed/partition.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/distributed/vector.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp_bindings/distributed/matrix.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/factorization/factorization.cpp
     PARENT_SCOPE)
