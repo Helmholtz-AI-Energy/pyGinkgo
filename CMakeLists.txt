@@ -81,13 +81,16 @@ if(GINKGO_BUILD_SYCL)
   add_compile_definitions(GINKGO_BUILD_SYCL)
 endif()
 
+find_package(MPI) # make it REQUIRED, if you want
+
 add_subdirectory(src/cpp_bindings)
 
 pybind11_add_module(pyGinkgoBindings ${PYGINKGO_CPP_SOURCES})
 
-target_include_directories(pyGinkgoBindings
-                           PRIVATE ${Ginkgo_BINARY_DIR}/include)
+target_include_directories(pyGinkgoBindings PRIVATE ${Ginkgo_BINARY_DIR}/include
+                                                    ${MPI_INCLUDE_PATH})
 target_link_libraries(pyGinkgoBindings PRIVATE Ginkgo::ginkgo)
+target_link_libraries(pyGinkgoBindings PRIVATE ${MPI_C_LIBRARIES})
 target_link_libraries(pyGinkgoBindings PUBLIC nlohmann_json::nlohmann_json)
 set_property(TARGET pyGinkgoBindings PROPERTY CXX_STANDARD 14)
 
