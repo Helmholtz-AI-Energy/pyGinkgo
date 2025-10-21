@@ -20,7 +20,6 @@ void init_partition(py::module_ &module)
             "size",
             &gko::experimental::distributed::Partition<int, int>::get_size,
             "get the total number of elements represented by this partition.");
-    ;
 
     module.def(
         "partition_from_global_size", [](std::shared_ptr<gko::Executor> exec,

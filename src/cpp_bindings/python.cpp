@@ -96,5 +96,5 @@ PYBIND11_MODULE(pyGinkgoBindings, m)
     init_communicator(module_distributed);
     init_partition(module_distributed);
     init_vector_all_types(module_distributed);
-    // init_dist_matrix_all_types(module_distributed);
+    init_dist_matrix_all_types(module_distributed);
 }
