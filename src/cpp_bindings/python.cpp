@@ -9,6 +9,7 @@ namespace py = pybind11;
 void init_array_all_types(py::module_ &);
 void init_dense_all_types(py::module_ &);
 void init_sparse_all_types(py::module_ &);
+void init_conv2d_all_types(py::module_ &);
 void init_logger_all_types(py::module_ &);
 void init_gmres_all_types(py::module_ &);
 void init_direct_all_types(py::module_ &);
@@ -67,6 +68,7 @@ PYBIND11_MODULE(pyGinkgoBindings, m)
 
     init_dense_all_types(module_matrix);
     init_sparse_all_types(module_matrix);
+    init_conv2d_all_types(module_matrix);
 
     py::module_ module_logger =
         m.def_submodule("logger", "Submodule for Ginkgos logger type bindings");
