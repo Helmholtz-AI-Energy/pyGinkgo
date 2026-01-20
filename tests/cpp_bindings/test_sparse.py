@@ -209,13 +209,13 @@ class TestSparseMatrix:
         sparse = matrix_cls(self.ref, (5, 5), coeffs, cols, rows)
         dense = sparse.convert_to_dense()
         assert dense == dense
+
     def test_can_transpose_sparse_matrix(
         self,
         matrix_format,
         value_type: pg.gko_types.ValueType,
         index_type: pg.gko_types.IndexType,
     ):
-
         matrix_cls = getattr(pGB.matrix, f"{matrix_format}_{value_type}_{index_type}")
         coeffs = np.array(self.values, dtype=value_type.numpy_type)
         rows = np.array(self.get_rows(matrix_format), dtype=index_type.numpy_type)
@@ -235,7 +235,7 @@ class TestSparseMatrix:
         for i in range(5):
             for j in range(5):
                 assert dense_T.at(i, j) == dense.at(j, i)
-                
+
     def test_double_transpose_returns_original(
         self,
         matrix_format,
@@ -261,5 +261,3 @@ class TestSparseMatrix:
         for i in range(5):
             for j in range(5):
                 assert dense_TT.at(i, j) == dense_orig.at(i, j)
-
-
