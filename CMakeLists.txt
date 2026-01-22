@@ -80,11 +80,17 @@ add_subdirectory(src/cpp_bindings)
 
 pybind11_add_module(pyGinkgoBindings ${PYGINKGO_CPP_SOURCES})
 
+pybind11_add_module(pyGinkgoExtensions ${EXTENSIONS_CPP_SOURCES})
+
 target_include_directories(pyGinkgoBindings
                            PRIVATE ${Ginkgo_BINARY_DIR}/include)
+target_include_directories(pyGinkgoExtensions
+                           PRIVATE ${Ginkgo_BINARY_DIR}/include)
 target_link_libraries(pyGinkgoBindings PRIVATE Ginkgo::ginkgo)
+target_link_libraries(pyGinkgoExtensions PRIVATE Ginkgo::ginkgo)
 target_link_libraries(pyGinkgoBindings PUBLIC nlohmann_json::nlohmann_json)
 set_property(TARGET pyGinkgoBindings PROPERTY CXX_STANDARD 14)
+set_property(TARGET pyGinkgoExtensions PROPERTY CXX_STANDARD 14)
 
 # Disable false positive warnings from GCC (>= 12.4 and <
 # 13)(https://gcc.gnu.org/bugzilla/show_bug.cgi?id=115824 and
@@ -94,6 +100,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
    AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13.0.0)
   target_compile_options(pyGinkgoBindings PRIVATE -Wno-array-bounds
                                                   -Wno-stringop-overread)
+  target_compile_options(pyGinkgoExtensions PRIVATE -Wno-array-bounds
+                                                    -Wno-stringop-overread)
   message(
     WARNING
       "GCC >= 12.4.0 < 13 gives false positive warning, so we need to add \
