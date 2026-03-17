@@ -44,6 +44,7 @@ endif()
 # Find  Ginkgo find_package(Ginkgo 1.7.0 QUIET)
 find_package(ginkgo QUIET)
 
+set(_gko_fetchcontent_targets "")
 # Fetch Ginkgo if not found
 if(NOT ginkgo_FOUND)
   # If not found, fetch Ginkgo
@@ -64,12 +65,18 @@ if(NOT ginkgo_FOUND)
     EXCLUDE_FROM_ALL)
   FetchContent_MakeAvailable(ginkgo)
 
-  # Set RPATH on Ginkgo libraries so they can find each other when
-  # installed alongside pyGinkgoBindings (the install command below
-  # copies them into the same site-packages directory).
+  # Place Ginkgo shared libraries next to pyGinkgoBindings in the build
+  # tree so the virtual-installation folder is self-contained, and set
+  # RPATH so the libraries can find each other after installation.
+  set(_gko_fetchcontent_targets "")
   foreach(_gko_target ginkgo ginkgo_device ginkgo_reference ginkgo_omp
                       ginkgo_cuda ginkgo_hip ginkgo_dpcpp)
     if(TARGET ${_gko_target})
+      list(APPEND _gko_fetchcontent_targets ${_gko_target})
+      set_target_properties(${_gko_target} PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+      )
       if(APPLE)
         set_target_properties(${_gko_target} PROPERTIES
           INSTALL_RPATH "@loader_path"
@@ -189,7 +196,8 @@ set(PYGINKGO_PYTHON_FILES
     ${PROJECT_SOURCE_DIR}/src/pyGinkgo/device.py
     ${PROJECT_SOURCE_DIR}/src/pyGinkgo/solver.py
     ${PROJECT_SOURCE_DIR}/src/pyGinkgo/rayleigh_ritz.py
-    ${PROJECT_SOURCE_DIR}/src/pyGinkgo/preconditioner.py)
+    ${PROJECT_SOURCE_DIR}/src/pyGinkgo/preconditioner.py
+    ${PROJECT_SOURCE_DIR}/src/pyGinkgo/cupy_interop.py)
 # TODO: it seems reasonable to be to start using glob recuse above
 
 add_custom_target(
@@ -210,14 +218,25 @@ add_subdirectory(tests/pyGinkgo)
 message(STATUS "Install path: ${Python_SITELIB}")
 install(DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
         DESTINATION ${Python_SITELIB})
-install(
-  IMPORTED_RUNTIME_ARTIFACTS
-  ginkgo
-  ginkgo_device
-  ginkgo_hip
-  ginkgo_cuda
-  ginkgo_omp
-  ginkgo_dpcpp
-  ginkgo_reference
-  DESTINATION
-  ${Python_SITELIB}/${PROJECT_NAME})
+# Install Ginkgo shared libraries into the package directory.
+# FetchContent targets are regular targets (install via TARGETS);
+# pre-installed Ginkgo provides IMPORTED targets (install via
+# IMPORTED_RUNTIME_ARTIFACTS).
+if(_gko_fetchcontent_targets)
+  install(
+    TARGETS ${_gko_fetchcontent_targets}
+    LIBRARY DESTINATION ${Python_SITELIB}/${PROJECT_NAME}
+    RUNTIME DESTINATION ${Python_SITELIB}/${PROJECT_NAME})
+else()
+  install(
+    IMPORTED_RUNTIME_ARTIFACTS
+    ginkgo
+    ginkgo_device
+    ginkgo_hip
+    ginkgo_cuda
+    ginkgo_omp
+    ginkgo_dpcpp
+    ginkgo_reference
+    DESTINATION
+    ${Python_SITELIB}/${PROJECT_NAME})
+endif()
