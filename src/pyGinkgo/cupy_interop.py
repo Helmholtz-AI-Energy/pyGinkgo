@@ -440,28 +440,37 @@ def gko_csr_to_cupy(gko_csr):
             values = cupy.ndarray(
                 nnz,
                 dtype=np_vdtype,
-                memptr=cupy.cuda.UnownedMemory(
-                    vals_ptr,
-                    nnz * np_vdtype.itemsize,
-                    gko_csr,
+                memptr=cupy.cuda.MemoryPointer(
+                    cupy.cuda.UnownedMemory(
+                        vals_ptr,
+                        nnz * np_vdtype.itemsize,
+                        gko_csr,
+                    ),
+                    0,
                 ),
             )
             col_idxs = cupy.ndarray(
                 nnz,
                 dtype=np_idtype,
-                memptr=cupy.cuda.UnownedMemory(
-                    cols_ptr,
-                    nnz * np_idtype.itemsize,
-                    gko_csr,
+                memptr=cupy.cuda.MemoryPointer(
+                    cupy.cuda.UnownedMemory(
+                        cols_ptr,
+                        nnz * np_idtype.itemsize,
+                        gko_csr,
+                    ),
+                    0,
                 ),
             )
             row_ptrs = cupy.ndarray(
                 shape[0] + 1,
                 dtype=np_idtype,
-                memptr=cupy.cuda.UnownedMemory(
-                    rows_ptr,
-                    (shape[0] + 1) * np_idtype.itemsize,
-                    gko_csr,
+                memptr=cupy.cuda.MemoryPointer(
+                    cupy.cuda.UnownedMemory(
+                        rows_ptr,
+                        (shape[0] + 1) * np_idtype.itemsize,
+                        gko_csr,
+                    ),
+                    0,
                 ),
             )
             return cupy_sparse.csr_matrix(
@@ -519,28 +528,37 @@ def gko_coo_to_cupy(gko_coo):
             values = cupy.ndarray(
                 nnz,
                 dtype=np_vdtype,
-                memptr=cupy.cuda.UnownedMemory(
-                    vals_ptr,
-                    nnz * np_vdtype.itemsize,
-                    gko_coo,
+                memptr=cupy.cuda.MemoryPointer(
+                    cupy.cuda.UnownedMemory(
+                        vals_ptr,
+                        nnz * np_vdtype.itemsize,
+                        gko_coo,
+                    ),
+                    0,
                 ),
             )
             col_idxs = cupy.ndarray(
                 nnz,
                 dtype=np_idtype,
-                memptr=cupy.cuda.UnownedMemory(
-                    cols_ptr,
-                    nnz * np_idtype.itemsize,
-                    gko_coo,
+                memptr=cupy.cuda.MemoryPointer(
+                    cupy.cuda.UnownedMemory(
+                        cols_ptr,
+                        nnz * np_idtype.itemsize,
+                        gko_coo,
+                    ),
+                    0,
                 ),
             )
             row_idxs = cupy.ndarray(
                 nnz,
                 dtype=np_idtype,
-                memptr=cupy.cuda.UnownedMemory(
-                    rows_ptr,
-                    nnz * np_idtype.itemsize,
-                    gko_coo,
+                memptr=cupy.cuda.MemoryPointer(
+                    cupy.cuda.UnownedMemory(
+                        rows_ptr,
+                        nnz * np_idtype.itemsize,
+                        gko_coo,
+                    ),
+                    0,
                 ),
             )
             return cupy_sparse.coo_matrix(
