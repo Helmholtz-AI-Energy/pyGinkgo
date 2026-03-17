@@ -8,6 +8,7 @@ import numpy as np
 from typing import Optional, Union
 
 from . import gko_types
+from .cupy_interop import is_cupy_array
 import pyGinkgo as pg
 from pyGinkgo import pyGinkgoBindings as pGB
 
@@ -31,6 +32,11 @@ def as_array(obj, device: gko_types.DeviceType = "cpu", dtype="float"):
         )
     
     executor = pg.device(device)
+
+    # CuPy array → Ginkgo array  (device-to-device when CUDA is available)
+    if is_cupy_array(obj):
+        from .cupy_interop import from_cupy_to_gko_array
+        return from_cupy_to_gko_array(obj, executor, dtype)
     
     array_cls = getattr(pGB.base, "array_" + dtype)
     return array_cls(executor, obj)
@@ -53,6 +59,11 @@ def as_tensor(
     
     executor = pg.device(device)
 
+    # CuPy array → Ginkgo dense  (device-to-device when CUDA is available)
+    if is_cupy_array(obj):
+        from .cupy_interop import from_cupy_to_gko_dense
+        return from_cupy_to_gko_dense(obj, executor, dtype)
+
     if torch_avail:
         if isinstance(obj, torch.Tensor):
             obj = obj.__array__()
@@ -67,6 +78,58 @@ def as_tensor(
             res.fill(fill)
         
         return res
+
+
+def as_csr(obj, device: gko_types.DeviceType = "cuda",
+           dtype: Optional[str] = None, itype: Optional[str] = None):
+    """Create a Ginkgo CSR matrix from a CuPy sparse CSR matrix.
+
+    This is the recommended entry point for passing CuPy sparse
+    matrices to Ginkgo solvers (GMRES, CG, etc.).  When built with
+    CUDA support the conversion is zero-copy.
+
+    Parameters
+    ----------
+    obj : cupyx.scipy.sparse.csr_matrix
+        Source CuPy CSR matrix.
+    device : str
+        Target device (default ``"cuda"``).
+    dtype : str, optional
+        Ginkgo value type.  Inferred from *obj* when not given.
+    itype : str, optional
+        Ginkgo index type.  Inferred from *obj* when not given.
+
+    Returns
+    -------
+    Ginkgo CSR matrix
+    """
+    executor = pg.device(device)
+    from .cupy_interop import from_cupy_csr_to_gko
+    return from_cupy_csr_to_gko(obj, executor, dtype=dtype, itype=itype)
+
+
+def as_coo(obj, device: gko_types.DeviceType = "cuda",
+           dtype: Optional[str] = None, itype: Optional[str] = None):
+    """Create a Ginkgo COO matrix from a CuPy sparse COO matrix.
+
+    Parameters
+    ----------
+    obj : cupyx.scipy.sparse.coo_matrix
+        Source CuPy COO matrix.
+    device : str
+        Target device (default ``"cuda"``).
+    dtype : str, optional
+        Ginkgo value type.  Inferred from *obj* when not given.
+    itype : str, optional
+        Ginkgo index type.  Inferred from *obj* when not given.
+
+    Returns
+    -------
+    Ginkgo COO matrix
+    """
+    executor = pg.device(device)
+    from .cupy_interop import from_cupy_coo_to_gko
+    return from_cupy_coo_to_gko(obj, executor, dtype=dtype, itype=itype)
 
 
 def read(

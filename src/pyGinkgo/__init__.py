@@ -12,3 +12,5 @@ from .rayleigh_ritz import *
 from . import gko_types
 from . import solver
 from . import preconditioner
+from . import cupy_interop
+
