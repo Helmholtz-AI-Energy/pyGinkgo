@@ -63,6 +63,24 @@ if(NOT ginkgo_FOUND)
     GIT_TAG develop
     EXCLUDE_FROM_ALL)
   FetchContent_MakeAvailable(ginkgo)
+
+  # Set RPATH on Ginkgo libraries so they can find each other when
+  # installed alongside pyGinkgoBindings (the install command below
+  # copies them into the same site-packages directory).
+  foreach(_gko_target ginkgo ginkgo_device ginkgo_reference ginkgo_omp
+                      ginkgo_cuda ginkgo_hip ginkgo_dpcpp)
+    if(TARGET ${_gko_target})
+      if(APPLE)
+        set_target_properties(${_gko_target} PROPERTIES
+          INSTALL_RPATH "@loader_path"
+        )
+      else()
+        set_target_properties(${_gko_target} PROPERTIES
+          INSTALL_RPATH "$ORIGIN"
+        )
+      endif()
+    endif()
+  endforeach()
 endif()
 
 # Pass build type down to c++ macro: https://stackoverflow.com/a/9017635/8302811
