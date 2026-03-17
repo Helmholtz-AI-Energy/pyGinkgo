@@ -73,9 +73,23 @@ if(NOT ginkgo_FOUND)
                       ginkgo_cuda ginkgo_hip ginkgo_dpcpp)
     if(TARGET ${_gko_target})
       list(APPEND _gko_fetchcontent_targets ${_gko_target})
+      # Direct build output into the package folder (handles versioned
+      # SO names like libginkgo.so.1.12.0).  Set the per-config variant
+      # too so that Release/Debug/etc. builds all land in the same place.
       set_target_properties(${_gko_target} PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+      )
+      # Allow install(TARGETS) to work for FetchContent targets that
+      # inherit EXCLUDE_FROM_ALL from their subdirectory.
+      set_target_properties(${_gko_target} PROPERTIES
+        EXCLUDE_FROM_ALL FALSE
       )
       if(APPLE)
         set_target_properties(${_gko_target} PROPERTIES
@@ -215,9 +229,13 @@ include(CTest) # https://cmake.org/pipermail/cmake/2015-January/059742.html -
 add_subdirectory(tests/cpp_bindings)
 add_subdirectory(tests/pyGinkgo)
 
-message(STATUS "Install path: ${Python_SITELIB}")
+# Install the self-contained package folder.  Use a *relative*
+# DESTINATION so that the path is resolved under CMAKE_INSTALL_PREFIX
+# (which py-build-cmake sets to a temporary staging directory when
+# building a wheel).  Using an absolute path like ${Python_SITELIB}
+# would bypass the prefix and the files would never end up in the wheel.
 install(DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
-        DESTINATION ${Python_SITELIB})
+        DESTINATION .)
 # Install Ginkgo shared libraries into the package directory.
 # FetchContent targets are regular targets (install via TARGETS);
 # pre-installed Ginkgo provides IMPORTED targets (install via
@@ -225,8 +243,8 @@ install(DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
 if(_gko_fetchcontent_targets)
   install(
     TARGETS ${_gko_fetchcontent_targets}
-    LIBRARY DESTINATION ${Python_SITELIB}/${PROJECT_NAME}
-    RUNTIME DESTINATION ${Python_SITELIB}/${PROJECT_NAME})
+    LIBRARY DESTINATION ${PROJECT_NAME}
+    RUNTIME DESTINATION ${PROJECT_NAME})
 else()
   install(
     IMPORTED_RUNTIME_ARTIFACTS
@@ -238,5 +256,5 @@ else()
     ginkgo_dpcpp
     ginkgo_reference
     DESTINATION
-    ${Python_SITELIB}/${PROJECT_NAME})
+    ${PROJECT_NAME})
 endif()
