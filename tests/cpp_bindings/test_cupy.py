@@ -435,6 +435,12 @@ class TestSolverWorkflow:
         b = cupy.ones(n, dtype=dtype)
         return A_csr, b
 
+    @staticmethod
+    def _assert_residual_small(A_csr, x_cp, b_cp, tol=1e-6):
+        """Check that || A @ x - b || < tol."""
+        residual = cupy.linalg.norm(A_csr.dot(x_cp.ravel()) - b_cp)
+        assert float(residual) < tol
+
     def test_solve_gmres_with_cupy_csr(self):
         """GMRES solver using a CuPy CSR matrix (zero-copy)."""
         import pyGinkgo as pg
@@ -461,12 +467,7 @@ class TestSolverWorkflow:
 
         x_cp = gko_to_cupy(x_gko)
         assert x_cp.shape[0] == 10
-
-        # Verify || A x - b || is small
-        residual = cupy.linalg.norm(
-            A_csr.dot(x_cp.ravel()) - b_cp
-        )
-        assert float(residual) < 1e-6
+        self._assert_residual_small(A_csr, x_cp, b_cp)
 
     def test_solve_cg_with_cupy_csr(self):
         """CG solver using a CuPy CSR matrix (zero-copy, SPD system)."""
@@ -493,10 +494,7 @@ class TestSolverWorkflow:
         _, x_gko = pg.solve(A_gko, b_gko, x_gko, solver_args=solver_args)
 
         x_cp = gko_to_cupy(x_gko)
-        residual = cupy.linalg.norm(
-            A_csr.dot(x_cp.ravel()) - b_cp
-        )
-        assert float(residual) < 1e-6
+        self._assert_residual_small(A_csr, x_cp, b_cp)
 
     @pytest.mark.parametrize("dtype", [cupy.float32, cupy.float64])
     def test_solve_preserves_dtype(self, dtype):
@@ -591,13 +589,17 @@ class TestEdgeCases:
             from_cupy_to_gko_array(cp_arr, None)
 
     def test_non_contiguous_cupy_array_is_handled(self):
-        """A non-contiguous CuPy array should be silently copied."""
+        """A non-contiguous CuPy array should be silently made contiguous."""
         cp_arr = cupy.array([[1, 2], [3, 4]], dtype=cupy.float32)
         col = cp_arr[:, 0]  # non-contiguous view (Fortran stride)
         assert not col.flags["C_CONTIGUOUS"]
 
-        # Should not raise; the function makes a contiguous copy internally
-        # (we only test the logic, not the Ginkgo creation which needs CUDA)
-        # The validation happens before the binding call, so this tests the
-        # Python-level contiguity handling.
-        assert col.shape == (2,)
+        # The conversion function should handle non-contiguous arrays
+        # by making a contiguous copy internally before extracting
+        # the device pointer.  We test the full path when CUDA is available.
+        if _has_cuda_device() and _has_gko_cuda():
+            import pyGinkgo.pyGinkgoBindings as pGB
+
+            executor = pGB.CudaExecutor()
+            gko_arr = from_cupy_to_gko_array(col, executor, "float")
+            assert gko_arr.shape == (2,)

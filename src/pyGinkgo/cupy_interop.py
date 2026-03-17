@@ -96,6 +96,22 @@ _NP_TO_GKO_INDEX_DTYPE = {
 
 _NP_TO_GKO_DTYPE = {**_NP_TO_GKO_VALUE_DTYPE, **_NP_TO_GKO_INDEX_DTYPE}
 
+# Reverse maps: Ginkgo dtype string → numpy dtype
+_GKO_VALUE_TO_NP = {v: k for k, v in _NP_TO_GKO_VALUE_DTYPE.items()}
+_GKO_INDEX_TO_NP = {v: k for k, v in _NP_TO_GKO_INDEX_DTYPE.items()}
+
+
+def _gko_class_dtypes(gko_obj):
+    """Extract (np_value_dtype, np_index_dtype) from a Ginkgo class name.
+
+    Class names follow the pattern ``Csr_float_int32``, ``Coo_double_int64``,
+    etc.  Returns ``(None, None)`` if the name cannot be parsed.
+    """
+    parts = type(gko_obj).__name__.split("_")
+    if len(parts) < 3:
+        return None, None
+    return _GKO_VALUE_TO_NP.get(parts[1]), _GKO_INDEX_TO_NP.get(parts[2])
+
 
 def _cupy_dtype_to_gko_dtype(cupy_arr) -> str:
     """Map a CuPy array's dtype to a Ginkgo dtype string."""
@@ -410,14 +426,17 @@ def gko_csr_to_cupy(gko_csr):
         cols_ptr = gko_csr.get_col_idxs_device_ptr()
         rows_ptr = gko_csr.get_row_ptrs_device_ptr()
 
-        # Determine dtypes from the class name (Csr_float_int32 etc.)
-        type_parts = type(gko_csr).__name__.split("_")
-        vtype = _NP_TO_GKO_VALUE_DTYPE
-        itype = _NP_TO_GKO_INDEX_DTYPE
-        np_vdtype = {v: k for k, v in vtype.items()}.get(type_parts[1])
-        np_idtype = {v: k for k, v in itype.items()}.get(type_parts[2])
+        np_vdtype, np_idtype = _gko_class_dtypes(gko_csr)
 
-        if np_vdtype is not None and np_idtype is not None:
+        if np_vdtype is None or np_idtype is None:
+            import warnings
+            warnings.warn(
+                f"Cannot determine dtypes from class name "
+                f"'{type(gko_csr).__name__}'; falling back to "
+                f"dense conversion through host memory.",
+                stacklevel=2,
+            )
+        else:
             values = cupy.ndarray(
                 nnz,
                 dtype=np_vdtype,
@@ -486,13 +505,17 @@ def gko_coo_to_cupy(gko_coo):
         cols_ptr = gko_coo.get_col_idxs_device_ptr()
         rows_ptr = gko_coo.get_row_idxs_device_ptr()
 
-        type_parts = type(gko_coo).__name__.split("_")
-        vtype = _NP_TO_GKO_VALUE_DTYPE
-        itype = _NP_TO_GKO_INDEX_DTYPE
-        np_vdtype = {v: k for k, v in vtype.items()}.get(type_parts[1])
-        np_idtype = {v: k for k, v in itype.items()}.get(type_parts[2])
+        np_vdtype, np_idtype = _gko_class_dtypes(gko_coo)
 
-        if np_vdtype is not None and np_idtype is not None:
+        if np_vdtype is None or np_idtype is None:
+            import warnings
+            warnings.warn(
+                f"Cannot determine dtypes from class name "
+                f"'{type(gko_coo).__name__}'; falling back to "
+                f"dense conversion through host memory.",
+                stacklevel=2,
+            )
+        else:
             values = cupy.ndarray(
                 nnz,
                 dtype=np_vdtype,
