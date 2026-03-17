@@ -1,4 +1,5 @@
 # Version 0.1.0 (unreleased)
+- Add CuPy interoperability for zero-copy GPU data exchange via `__cuda_array_interface__`
 - Make it pip installable [#86](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/86)
 - Fix circular import issue by renaming `types.py` to `gko_types.py` [#85](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/85)
 - Ensure the consistent format more automatically [#81](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/81)

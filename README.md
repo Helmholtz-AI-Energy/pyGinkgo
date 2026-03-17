@@ -25,6 +25,7 @@ The tests successfully run on the following Python versions:
 - Pybind11
 - Ninja # if you want to use cmake presets
 - [pybind11-stubgen](https://pypi.org/project/pybind11-stubgen/) # if you want to use [stubs generation](#stubs-generation)
+- [CuPy](https://cupy.dev/) # optional, for zero-copy GPU interoperability (see [CuPy Interoperability](#cupy-interoperability))
 
 ### Building the module via CMake
 
@@ -119,29 +120,154 @@ This will generate the stubs for the C++ code in the `pyGinkgoBindings` module i
 
 Usage examples can be found in [examples](examples) directory. Here's a simple example demonstrating how to use pyGinkgo to perform sparse matrix-vector multiplication:
 
-```
+```python
 import pyGinkgo as pg
 import numpy as np
 
 # Device initialization
-dev = pg.device ( "cuda" )
+dev = pg.device("cuda")
 
 # Initialize matrix and tensors
 fn = 'm1.mtx'
 
-A = pg.read ( device = dev , path = fn , dtype = "double" , format = "Csr" )
+A = pg.read(device=dev, path=fn, dtype="double", format="Csr")
 n_rows = A.shape[0]
 
-b = pg.as_tensor (
-device = dev , dim =( n_rows ,1) , dtype = "double" , fill =1.0)
+b = pg.as_tensor(device=dev, dim=(n_rows, 1), dtype="double", fill=1.0)
 
-x = pg.as_tensor (
-device = dev , dim =( n_rows ,1) , dtype = "double" , fill =0.0)
+x = pg.as_tensor(device=dev, dim=(n_rows, 1), dtype="double", fill=0.0)
 
 # Sparse Matrix Vector Product
-A.apply (b , x )
-
+A.apply(b, x)
 ```
+
+## CuPy Interoperability
+
+pyGinkgo supports zero-copy data exchange with [CuPy](https://cupy.dev/) on CUDA devices, eliminating unnecessary device-host-device memory transfers. This is especially useful when you are already working primarily on the GPU with CuPy and want to use Ginkgo's solvers without paying the cost of copying data back and forth.
+
+The interoperability uses the [`__cuda_array_interface__`](https://numba.readthedocs.io/en/stable/cuda/cuda_array_interface.html) (CAI v3) protocol, which is CuPy's native mechanism for sharing GPU memory.
+
+### Conversion Summary
+
+| Path | Mechanism | Zero-copy? |
+|------|-----------|:----------:|
+| CuPy CSR/COO → Ginkgo | `from_device_ptrs` (`gko::array::view`) | ✅ |
+| Ginkgo array/dense → CuPy | `__cuda_array_interface__` | ✅ |
+| Ginkgo CSR/COO → CuPy | Device pointer wrapping (`UnownedMemory`) | ✅ |
+| CuPy array/dense → Ginkgo | `from_device_ptr` (device-to-device copy) | Fast D2D |
+
+When pyGinkgo is built without CUDA support, all conversions fall back transparently to copying through host memory.
+
+### CuPy Examples
+
+#### Solving a linear system with GMRES using CuPy data
+
+```python
+import cupy
+import cupyx.scipy.sparse as sp
+import pyGinkgo as pg
+from pyGinkgo.cupy_interop import (
+    from_cupy_csr_to_gko,
+    from_cupy_to_gko_dense,
+    gko_to_cupy,
+)
+import pyGinkgo.pyGinkgoBindings as pGB
+
+# Build a sparse system entirely on the GPU
+n = 100
+diag = 2.0 * cupy.ones(n, dtype=cupy.float64)
+off  = -1.0 * cupy.ones(n - 1, dtype=cupy.float64)
+A_cupy = sp.csr_matrix(
+    cupy.diag(diag) + cupy.diag(off, 1) + cupy.diag(off, -1)
+)
+b_cupy = cupy.ones(n, dtype=cupy.float64)
+
+# Wrap CuPy data for Ginkgo — zero-copy for the CSR matrix
+executor = pGB.CudaExecutor()
+A_gko = from_cupy_csr_to_gko(A_cupy, executor)          # zero-copy view
+b_gko = from_cupy_to_gko_dense(b_cupy, executor, "double")  # device-to-device copy
+
+# Allocate solution vector on the GPU
+x_gko = pGB.matrix.dense_double(executor, (n, 1))
+x_gko.fill(0.0)
+
+# Solve with GMRES
+solver_args = {
+    "type": "solver::Gmres",
+    "criteria": [
+        {"type": "Iteration", "max_iters": 200},
+        {"type": "ResidualNorm", "reduction_factor": 1e-10},
+    ],
+}
+_, x_gko = pg.solve(A_gko, b_gko, x_gko, solver_args=solver_args)
+
+# Get the result back as a CuPy array — zero-copy
+x_cupy = gko_to_cupy(x_gko)
+```
+
+#### High-level convenience functions
+
+pyGinkgo's top-level API also accepts CuPy objects transparently:
+
+```python
+import cupy
+import cupyx.scipy.sparse as sp
+import pyGinkgo as pg
+
+# CuPy dense array → Ginkgo dense
+cp_arr = cupy.array([1.0, 2.0, 3.0], dtype=cupy.float32)
+gko_arr = pg.as_array(cp_arr, device="cuda", dtype="float")
+
+# CuPy dense 2-D array → Ginkgo dense matrix
+cp_mat = cupy.array([[1, 2], [3, 4]], dtype=cupy.float64)
+gko_dense = pg.as_tensor(cp_mat, device="cuda", dtype="double")
+
+# CuPy CSR sparse → Ginkgo CSR (zero-copy)
+A_cupy = sp.csr_matrix(cupy.eye(3, dtype=cupy.float64))
+A_gko = pg.as_csr(A_cupy, device="cuda")
+
+# CuPy COO sparse → Ginkgo COO (zero-copy)
+B_cupy = sp.coo_matrix(cupy.eye(4, dtype=cupy.float32))
+B_gko = pg.as_coo(B_cupy, device="cuda")
+```
+
+#### Converting Ginkgo objects back to CuPy
+
+```python
+from pyGinkgo.cupy_interop import gko_to_cupy, gko_csr_to_cupy, gko_coo_to_cupy
+
+# Dense / array → CuPy (zero-copy via __cuda_array_interface__)
+x_cupy = gko_to_cupy(gko_dense)
+
+# CSR → CuPy sparse CSR (zero-copy via device pointers)
+A_cupy = gko_csr_to_cupy(gko_csr)
+
+# COO → CuPy sparse COO (zero-copy via device pointers)
+B_cupy = gko_coo_to_cupy(gko_coo)
+```
+
+### CuPy API Reference
+
+#### Input (CuPy → Ginkgo)
+
+| Function | Description |
+|----------|-------------|
+| `pg.as_array(cupy_arr, device, dtype)` | Create a Ginkgo 1-D array from a CuPy array |
+| `pg.as_tensor(cupy_arr, device, dtype)` | Create a Ginkgo dense matrix from a CuPy 1-D or 2-D array |
+| `pg.as_csr(cupy_csr, device, dtype, itype)` | Create a Ginkgo CSR matrix from a CuPy CSR sparse matrix (zero-copy) |
+| `pg.as_coo(cupy_coo, device, dtype, itype)` | Create a Ginkgo COO matrix from a CuPy COO sparse matrix (zero-copy) |
+| `from_cupy_to_gko_array(cupy_arr, executor, dtype)` | Low-level: CuPy 1-D → Ginkgo array |
+| `from_cupy_to_gko_dense(cupy_arr, executor, dtype)` | Low-level: CuPy 1-D/2-D → Ginkgo dense |
+| `from_cupy_csr_to_gko(cupy_csr, executor, dtype, itype)` | Low-level: CuPy CSR → Ginkgo CSR |
+| `from_cupy_coo_to_gko(cupy_coo, executor, dtype, itype)` | Low-level: CuPy COO → Ginkgo COO |
+
+#### Output (Ginkgo → CuPy)
+
+| Function | Description |
+|----------|-------------|
+| `gko_to_cupy(gko_obj)` | Convert a Ginkgo array or dense matrix to a CuPy array (zero-copy) |
+| `gko_csr_to_cupy(gko_csr)` | Convert a Ginkgo CSR matrix to a CuPy CSR sparse matrix (zero-copy) |
+| `gko_coo_to_cupy(gko_coo)` | Convert a Ginkgo COO matrix to a CuPy COO sparse matrix (zero-copy) |
 
 ## Benchmarking
 
