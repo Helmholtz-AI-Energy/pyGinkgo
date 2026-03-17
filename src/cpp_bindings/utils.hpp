@@ -29,7 +29,7 @@ std::string get_cuda_array_typestr()
     auto np = py::module_::import("numpy");
     return np.attr("dtype")(py::format_descriptor<ValueType>::format())
         .attr("str")
-        .cast<std::string>();
+        .template cast<std::string>();
 }
 
 /**
