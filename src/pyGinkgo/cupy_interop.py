@@ -15,7 +15,7 @@ objects.
 When CAI is not available (e.g., CPU arrays or non-CUDA builds),
 a fallback path through host memory is used.
 
-Executor-bound API (recommended):
+API:
     The :class:`CuPyBridge` class provides an executor-centric
     interface that mirrors the pattern used by other backends (HIP,
     DPC++) where the executor drives array construction::
@@ -24,11 +24,6 @@ Executor-bound API (recommended):
         gko_arr  = bridge.array(cp_arr)      # CuPy → Ginkgo array
         gko_csr  = bridge.csr(cp_csr)        # CuPy → Ginkgo CSR
         cp_arr   = bridge.to_cupy(gko_arr)   # Ginkgo → CuPy
-
-Standalone helpers:
-    The module also exposes standalone functions (``from_cupy_to_gko_array``,
-    ``gko_to_cupy``, etc.) for use cases where the executor varies
-    across calls.
 
 Design rationale (``__cuda_array_interface__`` vs DLPack):
     We chose ``__cuda_array_interface__`` because:
@@ -162,23 +157,8 @@ def _cupy_index_dtype(cupy_arr) -> str:
 # CuPy dense / array  →  Ginkgo
 # ------------------------------------------------------------------
 
-def from_cupy_to_gko_array(cupy_arr, executor, dtype: Optional[str] = None):
-    """Create a Ginkgo 1-D array from a CuPy array.
-
-    Parameters
-    ----------
-    cupy_arr : cupy.ndarray
-        Source array (must be 1-D and C-contiguous).
-    executor : Ginkgo Executor
-        The target executor (should be a CUDA executor for zero-copy).
-    dtype : str, optional
-        Ginkgo dtype string (e.g. ``"float"``).  Inferred from
-        *cupy_arr* when not given.
-
-    Returns
-    -------
-    gko array object
-    """
+def _from_cupy_to_gko_array(cupy_arr, executor, dtype: Optional[str] = None):
+    """Create a Ginkgo 1-D array from a CuPy array."""
     from pyGinkgo import pyGinkgoBindings as pGB
 
     if not is_cupy_array(cupy_arr):
@@ -207,22 +187,8 @@ def from_cupy_to_gko_array(cupy_arr, executor, dtype: Optional[str] = None):
     return array_cls(executor, np_array)
 
 
-def from_cupy_to_gko_dense(cupy_arr, executor, dtype: Optional[str] = None):
-    """Create a Ginkgo dense matrix from a CuPy array.
-
-    Parameters
-    ----------
-    cupy_arr : cupy.ndarray
-        Source array (1-D or 2-D, C-contiguous).
-    executor : Ginkgo Executor
-        Target executor (should be a CUDA executor for zero-copy).
-    dtype : str, optional
-        Ginkgo dtype string.  Inferred from *cupy_arr* when not given.
-
-    Returns
-    -------
-    gko dense matrix object
-    """
+def _from_cupy_to_gko_dense(cupy_arr, executor, dtype: Optional[str] = None):
+    """Create a Ginkgo dense matrix from a CuPy array."""
     from pyGinkgo import pyGinkgoBindings as pGB
 
     if not is_cupy_array(cupy_arr):
@@ -260,33 +226,12 @@ def from_cupy_to_gko_dense(cupy_arr, executor, dtype: Optional[str] = None):
 # CuPy sparse  →  Ginkgo   (zero-copy view via from_device_ptrs)
 # ------------------------------------------------------------------
 
-def from_cupy_csr_to_gko(
+def _from_cupy_csr_to_gko(
     cupy_csr, executor,
     dtype: Optional[str] = None,
     itype: Optional[str] = None,
 ):
-    """Create a Ginkgo CSR matrix from a CuPy CSR sparse matrix.
-
-    When the C++ bindings are compiled with CUDA support, this wraps
-    the CuPy device arrays as zero-copy ``gko::array::view`` objects
-    (no data is copied).  The CuPy sparse matrix must not be
-    deallocated while the returned Ginkgo matrix is in use.
-
-    Parameters
-    ----------
-    cupy_csr : cupyx.scipy.sparse.csr_matrix
-        Source sparse matrix (on a CUDA device).
-    executor : Ginkgo CUDA Executor
-        Target executor.
-    dtype : str, optional
-        Ginkgo value-type string.  Inferred from ``cupy_csr.data``.
-    itype : str, optional
-        Ginkgo index-type string.  Inferred from ``cupy_csr.indices``.
-
-    Returns
-    -------
-    Ginkgo CSR matrix (``Csr_<dtype>_<itype>``)
-    """
+    """Create a Ginkgo CSR matrix from a CuPy CSR sparse matrix."""
     from pyGinkgo import pyGinkgoBindings as pGB
 
     if not cupy_sparse_avail:
@@ -320,28 +265,12 @@ def from_cupy_csr_to_gko(
     return csr_cls(executor, (shape[0], shape[1]), np_data, np_indices, np_indptr)
 
 
-def from_cupy_coo_to_gko(
+def _from_cupy_coo_to_gko(
     cupy_coo, executor,
     dtype: Optional[str] = None,
     itype: Optional[str] = None,
 ):
-    """Create a Ginkgo COO matrix from a CuPy COO sparse matrix.
-
-    Parameters
-    ----------
-    cupy_coo : cupyx.scipy.sparse.coo_matrix
-        Source sparse matrix (on a CUDA device).
-    executor : Ginkgo CUDA Executor
-        Target executor.
-    dtype : str, optional
-        Ginkgo value-type string.  Inferred from ``cupy_coo.data``.
-    itype : str, optional
-        Ginkgo index-type string.  Inferred from ``cupy_coo.col``.
-
-    Returns
-    -------
-    Ginkgo COO matrix (``Coo_<dtype>_<itype>``)
-    """
+    """Create a Ginkgo COO matrix from a CuPy COO sparse matrix."""
     from pyGinkgo import pyGinkgoBindings as pGB
 
     if not cupy_sparse_avail:
@@ -379,27 +308,11 @@ def from_cupy_coo_to_gko(
 # Ginkgo  →  CuPy
 # ------------------------------------------------------------------
 
-def gko_to_cupy(gko_obj):
-    """Convert a Ginkgo array or dense matrix to a CuPy array.
-
-    If the Ginkgo object is on a CUDA executor and exposes
-    ``__cuda_array_interface__``, CuPy creates a **zero-copy view**
-    directly into Ginkgo-managed device memory.
-
-    Otherwise the data is copied through host memory.
-
-    Parameters
-    ----------
-    gko_obj : gko array or dense matrix
-        The source Ginkgo object.
-
-    Returns
-    -------
-    cupy.ndarray
-    """
+def _gko_to_cupy(gko_obj):
+    """Convert a Ginkgo array or dense matrix to a CuPy array."""
     if not cupy_avail:
         raise ImportError(
-            "CuPy is required for gko_to_cupy(). "
+            "CuPy is required for CuPyBridge.to_cupy(). "
             "Install it with: pip install cupy-cuda12x"
         )
 
@@ -415,20 +328,8 @@ def gko_to_cupy(gko_obj):
     return cupy.asarray(np.array(gko_obj))
 
 
-def gko_csr_to_cupy(gko_csr):
-    """Convert a Ginkgo CSR matrix to a CuPy CSR sparse matrix.
-
-    When the Ginkgo matrix is on a CUDA executor this uses the raw
-    device pointers for a zero-copy conversion.
-
-    Parameters
-    ----------
-    gko_csr : Ginkgo CSR matrix
-
-    Returns
-    -------
-    cupyx.scipy.sparse.csr_matrix
-    """
+def _gko_csr_to_cupy(gko_csr):
+    """Convert a Ginkgo CSR matrix to a CuPy CSR sparse matrix."""
     if not cupy_avail or not cupy_sparse_avail:
         raise ImportError("CuPy with cupyx.scipy.sparse is required")
 
@@ -503,20 +404,8 @@ def gko_csr_to_cupy(gko_csr):
     return cupy_sparse.csr_matrix(sp)
 
 
-def gko_coo_to_cupy(gko_coo):
-    """Convert a Ginkgo COO matrix to a CuPy COO sparse matrix.
-
-    When the Ginkgo matrix is on a CUDA executor this uses the raw
-    device pointers for a zero-copy conversion.
-
-    Parameters
-    ----------
-    gko_coo : Ginkgo COO matrix
-
-    Returns
-    -------
-    cupyx.scipy.sparse.coo_matrix
-    """
+def _gko_coo_to_cupy(gko_coo):
+    """Convert a Ginkgo COO matrix to a CuPy COO sparse matrix."""
     if not cupy_avail or not cupy_sparse_avail:
         raise ImportError("CuPy with cupyx.scipy.sparse is required")
 
@@ -655,7 +544,7 @@ class CuPyBridge:
         -------
         gko array object
         """
-        return from_cupy_to_gko_array(cupy_arr, self._executor, dtype)
+        return _from_cupy_to_gko_array(cupy_arr, self._executor, dtype)
 
     def dense(self, cupy_arr, dtype=None):
         """Create a Ginkgo dense matrix from a CuPy array.
@@ -671,7 +560,7 @@ class CuPyBridge:
         -------
         gko dense matrix object
         """
-        return from_cupy_to_gko_dense(cupy_arr, self._executor, dtype)
+        return _from_cupy_to_gko_dense(cupy_arr, self._executor, dtype)
 
     def csr(self, cupy_csr, dtype=None, itype=None):
         """Create a Ginkgo CSR matrix from a CuPy CSR sparse matrix.
@@ -689,7 +578,7 @@ class CuPyBridge:
         -------
         Ginkgo CSR matrix
         """
-        return from_cupy_csr_to_gko(
+        return _from_cupy_csr_to_gko(
             cupy_csr, self._executor, dtype=dtype, itype=itype
         )
 
@@ -709,7 +598,7 @@ class CuPyBridge:
         -------
         Ginkgo COO matrix
         """
-        return from_cupy_coo_to_gko(
+        return _from_cupy_coo_to_gko(
             cupy_coo, self._executor, dtype=dtype, itype=itype
         )
 
@@ -727,7 +616,7 @@ class CuPyBridge:
         -------
         cupy.ndarray
         """
-        return gko_to_cupy(gko_obj)
+        return _gko_to_cupy(gko_obj)
 
     @staticmethod
     def to_cupy_csr(gko_csr):
@@ -741,7 +630,7 @@ class CuPyBridge:
         -------
         cupyx.scipy.sparse.csr_matrix
         """
-        return gko_csr_to_cupy(gko_csr)
+        return _gko_csr_to_cupy(gko_csr)
 
     @staticmethod
     def to_cupy_coo(gko_coo):
@@ -755,5 +644,5 @@ class CuPyBridge:
         -------
         cupyx.scipy.sparse.coo_matrix
         """
-        return gko_coo_to_cupy(gko_coo)
+        return _gko_coo_to_cupy(gko_coo)
 

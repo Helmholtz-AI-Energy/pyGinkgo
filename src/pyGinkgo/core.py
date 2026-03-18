@@ -8,7 +8,7 @@ import numpy as np
 from typing import Optional, Union
 
 from . import gko_types
-from .cupy_interop import is_cupy_array
+from .cupy_interop import is_cupy_array, CuPyBridge
 import pyGinkgo as pg
 from pyGinkgo import pyGinkgoBindings as pGB
 
@@ -35,8 +35,7 @@ def as_array(obj, device: gko_types.DeviceType = "cpu", dtype="float"):
 
     # CuPy array → Ginkgo array  (device-to-device when CUDA is available)
     if is_cupy_array(obj):
-        from .cupy_interop import from_cupy_to_gko_array
-        return from_cupy_to_gko_array(obj, executor, dtype)
+        return CuPyBridge(executor).array(obj, dtype)
     
     array_cls = getattr(pGB.base, "array_" + dtype)
     return array_cls(executor, obj)
@@ -61,8 +60,7 @@ def as_tensor(
 
     # CuPy array → Ginkgo dense  (device-to-device when CUDA is available)
     if is_cupy_array(obj):
-        from .cupy_interop import from_cupy_to_gko_dense
-        return from_cupy_to_gko_dense(obj, executor, dtype)
+        return CuPyBridge(executor).dense(obj, dtype)
 
     if torch_avail:
         if isinstance(obj, torch.Tensor):
@@ -104,8 +102,7 @@ def as_csr(obj, device: gko_types.DeviceType = "cuda",
     Ginkgo CSR matrix
     """
     executor = pg.device(device)
-    from .cupy_interop import from_cupy_csr_to_gko
-    return from_cupy_csr_to_gko(obj, executor, dtype=dtype, itype=itype)
+    return CuPyBridge(executor).csr(obj, dtype=dtype, itype=itype)
 
 
 def as_coo(obj, device: gko_types.DeviceType = "cuda",
@@ -128,8 +125,7 @@ def as_coo(obj, device: gko_types.DeviceType = "cuda",
     Ginkgo COO matrix
     """
     executor = pg.device(device)
-    from .cupy_interop import from_cupy_coo_to_gko
-    return from_cupy_coo_to_gko(obj, executor, dtype=dtype, itype=itype)
+    return CuPyBridge(executor).coo(obj, dtype=dtype, itype=itype)
 
 
 def read(

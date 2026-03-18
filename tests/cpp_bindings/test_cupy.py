@@ -36,13 +36,6 @@ except ImportError:
 from pyGinkgo.cupy_interop import (
     is_cupy_array,
     is_cupy_sparse,
-    from_cupy_to_gko_array,
-    from_cupy_to_gko_dense,
-    from_cupy_csr_to_gko,
-    from_cupy_coo_to_gko,
-    gko_to_cupy,
-    gko_csr_to_cupy,
-    gko_coo_to_cupy,
     CuPyBridge,
 )
 
@@ -107,142 +100,162 @@ class TestDetection:
         assert is_cupy_sparse(m)
 
 
-# ---- CuPy → Ginkgo array ----------------------------------------------
+# ---- CuPyBridge executor-bound API -----------------------------------
 
 @skip_no_cupy
 @skip_no_cuda
-@pytest.mark.parametrize(
-    "cupy_dtype,gko_dtype",
-    [
-        (cupy.float32, "float"),
-        (cupy.float64, "double"),
-    ],
-)
-class TestCuPyToGkoArray:
-    """CuPy 1-D array → Ginkgo array conversion."""
+class TestCuPyBridge:
+    """Test executor-bound CuPyBridge API.
 
-    def test_basic_conversion(self, cupy_dtype, gko_dtype):
+    Mirrors the executor-centric pattern used by HIP / DPC++ where the
+    executor drives array construction.
+    """
+
+    def test_create_from_executor(self):
         import pyGinkgo.pyGinkgoBindings as pGB
 
         executor = pGB.CudaExecutor()
-        cp_arr = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=cupy_dtype)
-        gko_arr = from_cupy_to_gko_array(cp_arr, executor, gko_dtype)
+        bridge = CuPyBridge(executor)
+        assert bridge.executor is executor
+
+    def test_create_from_device_string(self):
+        bridge = CuPyBridge("cuda")
+        assert bridge.executor is not None
+
+    def test_create_from_device_string_with_index(self):
+        bridge = CuPyBridge("cuda:0")
+        assert bridge.executor is not None
+
+    def test_rejects_invalid_type(self):
+        with pytest.raises(TypeError, match="Executor"):
+            CuPyBridge(42)
+
+    def test_importable_from_top_level(self):
+        import pyGinkgo as pg
+
+        assert hasattr(pg, "CuPyBridge")
+        assert pg.CuPyBridge is CuPyBridge
+
+    # -- CuPy → Ginkgo array --------------------------------------------
+
+    @pytest.mark.parametrize("dtype", ["float", "double"])
+    def test_array(self, dtype):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        cp_dtype = cupy.float32 if dtype == "float" else cupy.float64
+        bridge = CuPyBridge(pGB.CudaExecutor())
+
+        cp_arr = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=cp_dtype)
+        gko_arr = bridge.array(cp_arr, dtype=dtype)
         assert gko_arr.shape == (5,)
 
-    def test_dtype_inference(self, cupy_dtype, gko_dtype):
+    def test_array_dtype_inference(self):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
-        cp_arr = cupy.array([10.0, 20.0], dtype=cupy_dtype)
-        gko_arr = from_cupy_to_gko_array(cp_arr, executor)
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        cp_arr = cupy.array([10.0, 20.0], dtype=cupy.float64)
+        gko_arr = bridge.array(cp_arr)
         assert gko_arr.shape == (2,)
 
-    def test_rejects_2d(self, cupy_dtype, gko_dtype):
+    def test_array_rejects_2d(self):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
-        cp_arr = cupy.array([[1, 2], [3, 4]], dtype=cupy_dtype)
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        cp_arr = cupy.array([[1, 2], [3, 4]], dtype=cupy.float32)
         with pytest.raises(ValueError, match="1-D"):
-            from_cupy_to_gko_array(cp_arr, executor, gko_dtype)
+            bridge.array(cp_arr, dtype="float")
 
-    def test_rejects_non_cupy(self, cupy_dtype, gko_dtype):
+    def test_array_rejects_non_cupy(self):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
+        bridge = CuPyBridge(pGB.CudaExecutor())
         np_arr = np.array([1.0], dtype=np.float32)
         with pytest.raises(TypeError, match="CuPy"):
-            from_cupy_to_gko_array(np_arr, executor, gko_dtype)
+            bridge.array(np_arr, dtype="float")
 
+    # -- CuPy → Ginkgo dense --------------------------------------------
 
-# ---- CuPy → Ginkgo dense ----------------------------------------------
-
-@skip_no_cupy
-@skip_no_cuda
-@pytest.mark.parametrize(
-    "cupy_dtype,gko_dtype",
-    [
-        (cupy.float32, "float"),
-        (cupy.float64, "double"),
-    ],
-)
-class TestCuPyToGkoDense:
-    """CuPy 1-D / 2-D array → Ginkgo dense conversion."""
-
-    def test_1d_conversion(self, cupy_dtype, gko_dtype):
+    @pytest.mark.parametrize("dtype", ["float", "double"])
+    def test_dense_1d(self, dtype):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
-        cp_arr = cupy.array([1.0, 2.0, 3.0], dtype=cupy_dtype)
-        dense = from_cupy_to_gko_dense(cp_arr, executor, gko_dtype)
+        cp_dtype = cupy.float32 if dtype == "float" else cupy.float64
+        bridge = CuPyBridge(pGB.CudaExecutor())
+
+        cp_arr = cupy.array([1.0, 2.0, 3.0], dtype=cp_dtype)
+        dense = bridge.dense(cp_arr, dtype=dtype)
         assert dense.shape == (3, 1)
 
-    def test_2d_conversion(self, cupy_dtype, gko_dtype):
+    def test_dense_2d(self):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
-        cp_arr = cupy.array([[1, 2], [3, 4], [5, 6]], dtype=cupy_dtype)
-        dense = from_cupy_to_gko_dense(cp_arr, executor, gko_dtype)
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        cp_arr = cupy.array([[1, 2], [3, 4], [5, 6]], dtype=cupy.float64)
+        dense = bridge.dense(cp_arr, dtype="double")
         assert dense.shape == (3, 2)
 
-    def test_dtype_inference(self, cupy_dtype, gko_dtype):
+    def test_dense_dtype_inference(self):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
-        cp_arr = cupy.array([7.0, 8.0], dtype=cupy_dtype)
-        dense = from_cupy_to_gko_dense(cp_arr, executor)
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        cp_arr = cupy.array([7.0, 8.0], dtype=cupy.float32)
+        dense = bridge.dense(cp_arr)
         assert dense.shape == (2, 1)
 
-    def test_rejects_3d(self, cupy_dtype, gko_dtype):
+    def test_dense_rejects_3d(self):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
-        cp_arr = cupy.zeros((2, 3, 4), dtype=cupy_dtype)
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        cp_arr = cupy.zeros((2, 3, 4), dtype=cupy.float32)
         with pytest.raises(ValueError, match="1-D or 2-D"):
-            from_cupy_to_gko_dense(cp_arr, executor, gko_dtype)
+            bridge.dense(cp_arr, dtype="float")
 
+    # -- Ginkgo → CuPy (dense / array) ----------------------------------
 
-# ---- Ginkgo → CuPy (dense / array) ------------------------------------
-
-@skip_no_cupy
-@skip_no_cuda
-@pytest.mark.parametrize(
-    "cupy_dtype,gko_dtype",
-    [
-        (cupy.float32, "float"),
-        (cupy.float64, "double"),
-    ],
-)
-class TestGkoToCuPy:
-    """Ginkgo array / dense → CuPy via __cuda_array_interface__."""
-
-    def test_array_roundtrip(self, cupy_dtype, gko_dtype):
+    @pytest.mark.parametrize(
+        "cupy_dtype,gko_dtype",
+        [
+            (cupy.float32, "float"),
+            (cupy.float64, "double"),
+        ],
+    )
+    def test_to_cupy_array_roundtrip(self, cupy_dtype, gko_dtype):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
+        bridge = CuPyBridge(pGB.CudaExecutor())
         original = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=cupy_dtype)
-        gko_arr = from_cupy_to_gko_array(original, executor, gko_dtype)
+        gko_arr = bridge.array(original, dtype=gko_dtype)
 
-        roundtripped = gko_to_cupy(gko_arr)
+        roundtripped = bridge.to_cupy(gko_arr)
         cupy.testing.assert_array_almost_equal(original, roundtripped)
 
-    def test_dense_roundtrip(self, cupy_dtype, gko_dtype):
+    def test_to_cupy_dense_roundtrip(self):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
-        original = cupy.array([[1, 2], [3, 4]], dtype=cupy_dtype)
-        dense = from_cupy_to_gko_dense(original, executor, gko_dtype)
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        original = cupy.array([[1, 2], [3, 4]], dtype=cupy.float64)
+        dense = bridge.dense(original, dtype="double")
 
-        roundtripped = gko_to_cupy(dense)
+        roundtripped = bridge.to_cupy(dense)
         cupy.testing.assert_array_almost_equal(
             original.ravel(), roundtripped.ravel()
         )
 
+    # -- __cuda_array_interface__ verification ---------------------------
+
+    @pytest.mark.parametrize(
+        "cupy_dtype,gko_dtype",
+        [
+            (cupy.float32, "float"),
+            (cupy.float64, "double"),
+        ],
+    )
     def test_gko_array_has_cuda_interface(self, cupy_dtype, gko_dtype):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
+        bridge = CuPyBridge(pGB.CudaExecutor())
         cp_arr = cupy.array([1.0, 2.0], dtype=cupy_dtype)
-        gko_arr = from_cupy_to_gko_array(cp_arr, executor, gko_dtype)
+        gko_arr = bridge.array(cp_arr, dtype=gko_dtype)
         assert hasattr(gko_arr, "__cuda_array_interface__")
 
         cai = gko_arr.__cuda_array_interface__
@@ -250,15 +263,15 @@ class TestGkoToCuPy:
         assert cai["shape"] == (2,)
         assert isinstance(cai["data"], tuple)
 
-    def test_gko_dense_has_cuda_interface(self, cupy_dtype, gko_dtype):
+    def test_gko_dense_has_cuda_interface(self):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
-        cp_arr = cupy.array([1.0, 2.0, 3.0], dtype=cupy_dtype)
-        dense = from_cupy_to_gko_dense(cp_arr, executor, gko_dtype)
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        cp_arr = cupy.array([1.0, 2.0, 3.0], dtype=cupy.float64)
+        dense = bridge.dense(cp_arr, dtype="double")
         assert hasattr(dense, "__cuda_array_interface__")
 
-    def test_host_array_no_cuda_interface(self, cupy_dtype, gko_dtype):
+    def test_host_array_no_cuda_interface(self):
         """CPU arrays must NOT expose __cuda_array_interface__."""
         import pyGinkgo.pyGinkgoBindings as pGB
 
@@ -268,14 +281,7 @@ class TestGkoToCuPy:
         gko_arr = array_cls(ref, np_arr)
         assert not hasattr(gko_arr, "__cuda_array_interface__")
 
-
-# ---- CuPy CSR ↔ Ginkgo CSR -------------------------------------------
-
-@skip_no_cupy
-@skip_no_cupy_sparse
-@skip_no_cuda
-class TestCuPyCSR:
-    """CuPy CSR sparse ↔ Ginkgo CSR via zero-copy device views."""
+    # -- CuPy CSR ↔ Ginkgo CSR ------------------------------------------
 
     @staticmethod
     def _make_cupy_csr(dtype=cupy.float64, itype=cupy.int32):
@@ -286,55 +292,69 @@ class TestCuPyCSR:
         indptr = cupy.array([0, 2, 3, 5], dtype=itype)
         return cupy_sparse.csr_matrix((data, indices, indptr), shape=(3, 3))
 
+    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
+    @pytest.mark.parametrize("dtype", [cupy.float32, cupy.float64])
+    def test_csr(self, dtype):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        csr = self._make_cupy_csr(dtype)
+        gko_csr = bridge.csr(csr)
+        assert gko_csr.shape == (3, 3)
+        assert gko_csr.get_num_stored_elements() == 5
+
+    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
     @pytest.mark.parametrize("dtype", [cupy.float32, cupy.float64])
     @pytest.mark.parametrize("itype", [cupy.int32, cupy.int64])
     def test_csr_conversion_shape(self, dtype, itype):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
+        bridge = CuPyBridge(pGB.CudaExecutor())
         csr = self._make_cupy_csr(dtype, itype)
-        gko_csr = from_cupy_csr_to_gko(csr, executor)
+        gko_csr = bridge.csr(csr)
 
         assert gko_csr.shape == (3, 3)
         assert gko_csr.get_num_stored_elements() == 5
 
+    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
     @pytest.mark.parametrize("dtype", [cupy.float32, cupy.float64])
     def test_csr_spmv(self, dtype):
         """CSR matrix–vector product (SpMV) with CuPy data."""
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
+        bridge = CuPyBridge(pGB.CudaExecutor())
         csr = self._make_cupy_csr(dtype)
-        gko_csr = from_cupy_csr_to_gko(csr, executor)
+        gko_csr = bridge.csr(csr)
 
         # b = [1, 1, 1]  → x = A @ b
         b_cp = cupy.ones(3, dtype=dtype)
-        b_gko = from_cupy_to_gko_dense(b_cp, executor)
+        b_gko = bridge.dense(b_cp)
 
         gko_dtype = "float" if dtype == cupy.float32 else "double"
         x_cls = getattr(pGB.matrix, f"dense_{gko_dtype}")
-        x_gko = x_cls(executor, (3, 1))
+        x_gko = x_cls(bridge.executor, (3, 1))
         x_gko.fill(0.0)
 
         gko_csr.apply(b_gko, x_gko)
 
-        x_cp = gko_to_cupy(x_gko)
+        x_cp = bridge.to_cupy(x_gko)
         expected = cupy.array([3.0, 3.0, 9.0], dtype=dtype)
         cupy.testing.assert_array_almost_equal(x_cp.ravel(), expected)
 
-    def test_csr_roundtrip(self):
-        """CuPy CSR → Ginkgo CSR → CuPy CSR preserves structure."""
+    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
+    def test_to_cupy_csr_roundtrip(self):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
+        bridge = CuPyBridge(pGB.CudaExecutor())
         original = self._make_cupy_csr()
-        gko_csr = from_cupy_csr_to_gko(original, executor)
-        recovered = gko_csr_to_cupy(gko_csr)
+        gko_csr = bridge.csr(original)
+        recovered = bridge.to_cupy_csr(gko_csr)
 
         cupy.testing.assert_array_almost_equal(
             original.toarray(), recovered.toarray()
         )
 
+    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
     @pytest.mark.parametrize("dtype", [cupy.float32, cupy.float64])
     def test_from_device_ptrs_is_zero_copy(self, dtype):
         """Verify that from_device_ptrs uses view semantics."""
@@ -360,14 +380,7 @@ class TestCuPyCSR:
         assert gko_csr.shape == (3, 3)
         assert gko_csr.get_num_stored_elements() == 5
 
-
-# ---- CuPy COO ↔ Ginkgo COO -------------------------------------------
-
-@skip_no_cupy
-@skip_no_cupy_sparse
-@skip_no_cuda
-class TestCuPyCOO:
-    """CuPy COO sparse ↔ Ginkgo COO via zero-copy device views."""
+    # -- CuPy COO ↔ Ginkgo COO ------------------------------------------
 
     @staticmethod
     def _make_cupy_coo(dtype=cupy.float64, itype=cupy.int32):
@@ -377,26 +390,38 @@ class TestCuPyCOO:
         col = cupy.array([0, 2, 1, 0, 2], dtype=itype)
         return cupy_sparse.coo_matrix((data, (row, col)), shape=(3, 3))
 
+    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
+    @pytest.mark.parametrize("dtype", [cupy.float32, cupy.float64])
+    def test_coo(self, dtype):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        coo = self._make_cupy_coo(dtype)
+        gko_coo = bridge.coo(coo)
+        assert gko_coo.shape == (3, 3)
+        assert gko_coo.get_num_stored_elements() == 5
+
+    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
     @pytest.mark.parametrize("dtype", [cupy.float32, cupy.float64])
     @pytest.mark.parametrize("itype", [cupy.int32, cupy.int64])
     def test_coo_conversion_shape(self, dtype, itype):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
+        bridge = CuPyBridge(pGB.CudaExecutor())
         coo = self._make_cupy_coo(dtype, itype)
-        gko_coo = from_cupy_coo_to_gko(coo, executor)
+        gko_coo = bridge.coo(coo)
 
         assert gko_coo.shape == (3, 3)
         assert gko_coo.get_num_stored_elements() == 5
 
-    def test_coo_roundtrip(self):
-        """CuPy COO → Ginkgo COO → CuPy COO preserves structure."""
+    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
+    def test_to_cupy_coo_roundtrip(self):
         import pyGinkgo.pyGinkgoBindings as pGB
 
-        executor = pGB.CudaExecutor()
+        bridge = CuPyBridge(pGB.CudaExecutor())
         original = self._make_cupy_coo()
-        gko_coo = from_cupy_coo_to_gko(original, executor)
-        recovered = gko_coo_to_cupy(gko_coo)
+        gko_coo = bridge.coo(original)
+        recovered = bridge.to_cupy_coo(gko_coo)
 
         cupy.testing.assert_array_almost_equal(
             original.toarray(), recovered.toarray()
@@ -448,13 +473,13 @@ class TestSolverWorkflow:
         import pyGinkgo.pyGinkgoBindings as pGB
 
         A_csr, b_cp = self._make_spd_system(n=10)
-        executor = pGB.CudaExecutor()
+        bridge = CuPyBridge(pGB.CudaExecutor())
 
-        A_gko = from_cupy_csr_to_gko(A_csr, executor)
-        b_gko = from_cupy_to_gko_dense(b_cp, executor, dtype="double")
+        A_gko = bridge.csr(A_csr)
+        b_gko = bridge.dense(b_cp, dtype="double")
 
         dense_cls = getattr(pGB.matrix, "dense_double")
-        x_gko = dense_cls(executor, (10, 1))
+        x_gko = dense_cls(bridge.executor, (10, 1))
         x_gko.fill(0.0)
 
         solver_args = {
@@ -466,7 +491,7 @@ class TestSolverWorkflow:
         }
         _, x_gko = pg.solve(A_gko, b_gko, x_gko, solver_args=solver_args)
 
-        x_cp = gko_to_cupy(x_gko)
+        x_cp = bridge.to_cupy(x_gko)
         assert x_cp.shape[0] == 10
         self._assert_residual_small(A_csr, x_cp, b_cp)
 
@@ -476,13 +501,13 @@ class TestSolverWorkflow:
         import pyGinkgo.pyGinkgoBindings as pGB
 
         A_csr, b_cp = self._make_spd_system(n=10)
-        executor = pGB.CudaExecutor()
+        bridge = CuPyBridge(pGB.CudaExecutor())
 
-        A_gko = from_cupy_csr_to_gko(A_csr, executor)
-        b_gko = from_cupy_to_gko_dense(b_cp, executor, dtype="double")
+        A_gko = bridge.csr(A_csr)
+        b_gko = bridge.dense(b_cp, dtype="double")
 
         dense_cls = getattr(pGB.matrix, "dense_double")
-        x_gko = dense_cls(executor, (10, 1))
+        x_gko = dense_cls(bridge.executor, (10, 1))
         x_gko.fill(0.0)
 
         solver_args = {
@@ -494,7 +519,7 @@ class TestSolverWorkflow:
         }
         _, x_gko = pg.solve(A_gko, b_gko, x_gko, solver_args=solver_args)
 
-        x_cp = gko_to_cupy(x_gko)
+        x_cp = bridge.to_cupy(x_gko)
         self._assert_residual_small(A_csr, x_cp, b_cp)
 
     @pytest.mark.parametrize("dtype", [cupy.float32, cupy.float64])
@@ -505,13 +530,13 @@ class TestSolverWorkflow:
 
         gko_dtype = "float" if dtype == cupy.float32 else "double"
         A_csr, b_cp = self._make_spd_system(n=5, dtype=dtype)
-        executor = pGB.CudaExecutor()
+        bridge = CuPyBridge(pGB.CudaExecutor())
 
-        A_gko = from_cupy_csr_to_gko(A_csr, executor, dtype=gko_dtype)
-        b_gko = from_cupy_to_gko_dense(b_cp, executor, dtype=gko_dtype)
+        A_gko = bridge.csr(A_csr, dtype=gko_dtype)
+        b_gko = bridge.dense(b_cp, dtype=gko_dtype)
 
         dense_cls = getattr(pGB.matrix, f"dense_{gko_dtype}")
-        x_gko = dense_cls(executor, (5, 1))
+        x_gko = dense_cls(bridge.executor, (5, 1))
         x_gko.fill(0.0)
 
         solver_args = {
@@ -522,7 +547,7 @@ class TestSolverWorkflow:
             ],
         }
         _, x_gko = pg.solve(A_gko, b_gko, x_gko, solver_args=solver_args)
-        x_cp = gko_to_cupy(x_gko)
+        x_cp = bridge.to_cupy(x_gko)
         assert x_cp.dtype == dtype
 
 
@@ -572,181 +597,17 @@ class TestHighLevelAPI:
         assert gko_coo.shape == (4, 4)
 
 
-# ---- CuPyBridge executor-bound API -----------------------------------
-
-@skip_no_cupy
-@skip_no_cuda
-class TestCuPyBridge:
-    """Test executor-bound CuPyBridge API.
-
-    Mirrors the executor-centric pattern used by HIP / DPC++ where the
-    executor drives array construction.
-    """
-
-    def test_create_from_executor(self):
-        import pyGinkgo.pyGinkgoBindings as pGB
-
-        executor = pGB.CudaExecutor()
-        bridge = CuPyBridge(executor)
-        assert bridge.executor is executor
-
-    def test_create_from_device_string(self):
-        bridge = CuPyBridge("cuda")
-        assert bridge.executor is not None
-
-    def test_create_from_device_string_with_index(self):
-        bridge = CuPyBridge("cuda:0")
-        assert bridge.executor is not None
-
-    def test_rejects_invalid_type(self):
-        with pytest.raises(TypeError, match="Executor"):
-            CuPyBridge(42)
-
-    def test_importable_from_top_level(self):
-        import pyGinkgo as pg
-
-        assert hasattr(pg, "CuPyBridge")
-        assert pg.CuPyBridge is CuPyBridge
-
-    @pytest.mark.parametrize("dtype", ["float", "double"])
-    def test_array(self, dtype):
-        import pyGinkgo.pyGinkgoBindings as pGB
-
-        cp_dtype = cupy.float32 if dtype == "float" else cupy.float64
-        bridge = CuPyBridge(pGB.CudaExecutor())
-
-        cp_arr = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=cp_dtype)
-        gko_arr = bridge.array(cp_arr, dtype=dtype)
-        assert gko_arr.shape == (5,)
-
-    def test_array_dtype_inference(self):
-        import pyGinkgo.pyGinkgoBindings as pGB
-
-        bridge = CuPyBridge(pGB.CudaExecutor())
-        cp_arr = cupy.array([10.0, 20.0], dtype=cupy.float64)
-        gko_arr = bridge.array(cp_arr)
-        assert gko_arr.shape == (2,)
-
-    @pytest.mark.parametrize("dtype", ["float", "double"])
-    def test_dense_1d(self, dtype):
-        import pyGinkgo.pyGinkgoBindings as pGB
-
-        cp_dtype = cupy.float32 if dtype == "float" else cupy.float64
-        bridge = CuPyBridge(pGB.CudaExecutor())
-
-        cp_arr = cupy.array([1.0, 2.0, 3.0], dtype=cp_dtype)
-        dense = bridge.dense(cp_arr, dtype=dtype)
-        assert dense.shape == (3, 1)
-
-    def test_dense_2d(self):
-        import pyGinkgo.pyGinkgoBindings as pGB
-
-        bridge = CuPyBridge(pGB.CudaExecutor())
-        cp_arr = cupy.array([[1, 2], [3, 4], [5, 6]], dtype=cupy.float64)
-        dense = bridge.dense(cp_arr, dtype="double")
-        assert dense.shape == (3, 2)
-
-    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
-    @pytest.mark.parametrize("dtype", [cupy.float32, cupy.float64])
-    def test_csr(self, dtype):
-        import pyGinkgo.pyGinkgoBindings as pGB
-
-        bridge = CuPyBridge(pGB.CudaExecutor())
-        data = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)
-        indices = cupy.array([0, 2, 1, 0, 2], dtype=cupy.int32)
-        indptr = cupy.array([0, 2, 3, 5], dtype=cupy.int32)
-        csr = cupy_sparse.csr_matrix((data, indices, indptr), shape=(3, 3))
-
-        gko_csr = bridge.csr(csr)
-        assert gko_csr.shape == (3, 3)
-        assert gko_csr.get_num_stored_elements() == 5
-
-    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
-    @pytest.mark.parametrize("dtype", [cupy.float32, cupy.float64])
-    def test_coo(self, dtype):
-        import pyGinkgo.pyGinkgoBindings as pGB
-
-        bridge = CuPyBridge(pGB.CudaExecutor())
-        data = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)
-        row = cupy.array([0, 0, 1, 2, 2], dtype=cupy.int32)
-        col = cupy.array([0, 2, 1, 0, 2], dtype=cupy.int32)
-        coo = cupy_sparse.coo_matrix((data, (row, col)), shape=(3, 3))
-
-        gko_coo = bridge.coo(coo)
-        assert gko_coo.shape == (3, 3)
-        assert gko_coo.get_num_stored_elements() == 5
-
-    def test_to_cupy_array_roundtrip(self):
-        import pyGinkgo.pyGinkgoBindings as pGB
-
-        bridge = CuPyBridge(pGB.CudaExecutor())
-        original = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=cupy.float64)
-        gko_arr = bridge.array(original, dtype="double")
-
-        roundtripped = bridge.to_cupy(gko_arr)
-        cupy.testing.assert_array_almost_equal(original, roundtripped)
-
-    def test_to_cupy_dense_roundtrip(self):
-        import pyGinkgo.pyGinkgoBindings as pGB
-
-        bridge = CuPyBridge(pGB.CudaExecutor())
-        original = cupy.array([[1, 2], [3, 4]], dtype=cupy.float64)
-        dense = bridge.dense(original, dtype="double")
-
-        roundtripped = bridge.to_cupy(dense)
-        cupy.testing.assert_array_almost_equal(
-            original.ravel(), roundtripped.ravel()
-        )
-
-    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
-    def test_to_cupy_csr_roundtrip(self):
-        import pyGinkgo.pyGinkgoBindings as pGB
-
-        bridge = CuPyBridge(pGB.CudaExecutor())
-        data = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=cupy.float64)
-        indices = cupy.array([0, 2, 1, 0, 2], dtype=cupy.int32)
-        indptr = cupy.array([0, 2, 3, 5], dtype=cupy.int32)
-        original = cupy_sparse.csr_matrix((data, indices, indptr), shape=(3, 3))
-
-        gko_csr = bridge.csr(original)
-        recovered = bridge.to_cupy_csr(gko_csr)
-        cupy.testing.assert_array_almost_equal(
-            original.toarray(), recovered.toarray()
-        )
-
-    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
-    def test_to_cupy_coo_roundtrip(self):
-        import pyGinkgo.pyGinkgoBindings as pGB
-
-        bridge = CuPyBridge(pGB.CudaExecutor())
-        data = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=cupy.float64)
-        row = cupy.array([0, 0, 1, 2, 2], dtype=cupy.int32)
-        col = cupy.array([0, 2, 1, 0, 2], dtype=cupy.int32)
-        original = cupy_sparse.coo_matrix((data, (row, col)), shape=(3, 3))
-
-        gko_coo = bridge.coo(original)
-        recovered = bridge.to_cupy_coo(gko_coo)
-        cupy.testing.assert_array_almost_equal(
-            original.toarray(), recovered.toarray()
-        )
-
-
 # ---- Edge cases / error handling ---------------------------------------
 
 @skip_no_cupy
 class TestEdgeCases:
     """Error handling and edge cases."""
 
-    def test_gko_to_cupy_requires_cupy(self):
-        """gko_to_cupy must raise ImportError when CuPy is absent."""
-        # We cannot truly remove CuPy in this test, but we can check the
-        # function exists and runs when CuPy IS present.
-        pass
-
     def test_unsupported_dtype_raises(self):
+        bridge = CuPyBridge("cpu")
         cp_arr = cupy.array([1 + 2j, 3 + 4j])
         with pytest.raises(TypeError, match="Unsupported"):
-            from_cupy_to_gko_array(cp_arr, None)
+            bridge.array(cp_arr)
 
     def test_non_contiguous_cupy_array_is_handled(self):
         """A non-contiguous CuPy array should be silently made contiguous."""
@@ -758,8 +619,6 @@ class TestEdgeCases:
         # by making a contiguous copy internally before extracting
         # the device pointer.  We test the full path when CUDA is available.
         if _has_cuda_device() and _has_gko_cuda():
-            import pyGinkgo.pyGinkgoBindings as pGB
-
-            executor = pGB.CudaExecutor()
-            gko_arr = from_cupy_to_gko_array(col, executor, "float")
+            bridge = CuPyBridge("cuda")
+            gko_arr = bridge.array(col, dtype="float")
             assert gko_arr.shape == (2,)
