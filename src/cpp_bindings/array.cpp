@@ -167,8 +167,7 @@ void init_array(py::module_ &module, const std::string typestr)
         });
 
     // Factory method to create an array from a raw CUDA device pointer.
-    // Used by cupy_interop to perform device-to-device copies without
-    // going through host memory.
+    // Creates an owning copy of the data pointed to.
     cls.def_static(
         "from_device_ptr",
         [](std::shared_ptr<gko::Executor> exec, uintptr_t ptr, size_t size) {

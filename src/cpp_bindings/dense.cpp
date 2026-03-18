@@ -361,8 +361,7 @@ void init_dense(py::module_ &module_matrix, const std::string typestr)
         });
 
     // Factory method to create a dense matrix from a raw CUDA device
-    // pointer. Used by cupy_interop to perform device-to-device copies
-    // without going through host memory.
+    // pointer. Creates an owning copy of the data pointed to.
     cls.def_static(
         "from_device_ptr",
         [](std::shared_ptr<gko::Executor> exec, uintptr_t ptr, size_t rows,
