@@ -241,61 +241,69 @@ void init_matrix(py::module_ &module, const std::string matrix_type,
     // These return non-owning gko::array views into the sparse
     // matrix's internal storage.  On CUDA executors the returned
     // arrays expose __cuda_array_interface__; on CPU they support
-    // the buffer protocol.  py::keep_alive<0,1> ensures the sparse
-    // matrix stays alive while the view exists.
+    // the buffer protocol.
+    //
+    // pybind11's def_property family does not support keep_alive,
+    // so we wrap the getter in py::cpp_function with keep_alive
+    // attached, then pass it to def_property_readonly.
 
     cls.def_property_readonly(
         "data",
-        [](MatrixType<ValueType, IndexType> &m) {
-            return gko::array<ValueType>::view(
-                m.get_executor(), m.get_num_stored_elements(),
-                m.get_values());
-        },
-        py::keep_alive<0, 1>(),
+        py::cpp_function(
+            [](MatrixType<ValueType, IndexType> &m) {
+                return gko::array<ValueType>::view(
+                    m.get_executor(), m.get_num_stored_elements(),
+                    m.get_values());
+            },
+            py::keep_alive<0, 1>()),
         "Non-owning array view of stored values (nnz elements).");
 
     if constexpr (std::is_same_v<MatrixType<ValueType, IndexType>,
                                  gko::matrix::Csr<ValueType, IndexType>>) {
         cls.def_property_readonly(
             "indices",
-            [](gko::matrix::Csr<ValueType, IndexType> &m) {
-                return gko::array<IndexType>::view(
-                    m.get_executor(), m.get_num_stored_elements(),
-                    m.get_col_idxs());
-            },
-            py::keep_alive<0, 1>(),
+            py::cpp_function(
+                [](gko::matrix::Csr<ValueType, IndexType> &m) {
+                    return gko::array<IndexType>::view(
+                        m.get_executor(), m.get_num_stored_elements(),
+                        m.get_col_idxs());
+                },
+                py::keep_alive<0, 1>()),
             "Non-owning array view of column indices (nnz elements).");
 
         cls.def_property_readonly(
             "indptr",
-            [](gko::matrix::Csr<ValueType, IndexType> &m) {
-                auto n_rows = m.get_size()[0];
-                return gko::array<IndexType>::view(
-                    m.get_executor(), n_rows + 1,
-                    m.get_row_ptrs());
-            },
-            py::keep_alive<0, 1>(),
+            py::cpp_function(
+                [](gko::matrix::Csr<ValueType, IndexType> &m) {
+                    auto n_rows = m.get_size()[0];
+                    return gko::array<IndexType>::view(
+                        m.get_executor(), n_rows + 1,
+                        m.get_row_ptrs());
+                },
+                py::keep_alive<0, 1>()),
             "Non-owning array view of row pointers "
             "(n_rows + 1 elements).");
     } else {
         cls.def_property_readonly(
             "col",
-            [](gko::matrix::Coo<ValueType, IndexType> &m) {
-                return gko::array<IndexType>::view(
-                    m.get_executor(), m.get_num_stored_elements(),
-                    m.get_col_idxs());
-            },
-            py::keep_alive<0, 1>(),
+            py::cpp_function(
+                [](gko::matrix::Coo<ValueType, IndexType> &m) {
+                    return gko::array<IndexType>::view(
+                        m.get_executor(), m.get_num_stored_elements(),
+                        m.get_col_idxs());
+                },
+                py::keep_alive<0, 1>()),
             "Non-owning array view of column indices (nnz elements).");
 
         cls.def_property_readonly(
             "row",
-            [](gko::matrix::Coo<ValueType, IndexType> &m) {
-                return gko::array<IndexType>::view(
-                    m.get_executor(), m.get_num_stored_elements(),
-                    m.get_row_idxs());
-            },
-            py::keep_alive<0, 1>(),
+            py::cpp_function(
+                [](gko::matrix::Coo<ValueType, IndexType> &m) {
+                    return gko::array<IndexType>::view(
+                        m.get_executor(), m.get_num_stored_elements(),
+                        m.get_row_idxs());
+                },
+                py::keep_alive<0, 1>()),
             "Non-owning array view of row indices (nnz elements).");
     }
 

@@ -108,7 +108,7 @@ void init_dense(py::module_ &module_matrix, const std::string typestr)
                        auto b = py::array_t<ValueType,
                                             py::array::c_style |
                                                 py::array::forcecast>(obj);
-                       return init_func(exec, b);
+                       return gko::share(init_func(exec, b));
                    }),
                    py::keep_alive<1, 3>())
                    .def(py::init([](std::shared_ptr<gko::Executor> exec,
