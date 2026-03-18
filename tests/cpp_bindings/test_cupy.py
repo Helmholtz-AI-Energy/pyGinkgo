@@ -604,6 +604,8 @@ class TestEdgeCases:
     """Error handling and edge cases."""
 
     def test_unsupported_dtype_raises(self):
+        # CPU executor suffices: the dtype validation fires before any
+        # executor interaction.
         bridge = CuPyBridge("cpu")
         cp_arr = cupy.array([1 + 2j, 3 + 4j])
         with pytest.raises(TypeError, match="Unsupported"):

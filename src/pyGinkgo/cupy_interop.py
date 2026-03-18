@@ -312,7 +312,7 @@ def _gko_to_cupy(gko_obj):
     """Convert a Ginkgo array or dense matrix to a CuPy array."""
     if not cupy_avail:
         raise ImportError(
-            "CuPy is required for CuPyBridge.to_cupy(). "
+            "CuPy is required for converting Ginkgo objects to CuPy arrays. "
             "Install it with: pip install cupy-cuda12x"
         )
 
