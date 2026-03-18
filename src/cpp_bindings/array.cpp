@@ -21,6 +21,8 @@ void init_array(py::module_ &module, const std::string typestr)
             .def(py::init(
                 [](std::shared_ptr<gko::Executor> exec,
                    py::object obj) {
+                    // The second argument can be either a python buffer (numpy array)
+                    // or a cupy array on a GPU.
 #ifdef GINKGO_BUILD_CUDA
                     // Fast path: if the input exposes
                     // __cuda_array_interface__ and the executor is a
@@ -59,7 +61,10 @@ void init_array(py::module_ &module, const std::string typestr)
                             reinterpret_cast<ValueType *>(ptr));
                     }
 #endif
-                    // Fallback: use buffer protocol (host memory)
+                    // Fallback: use buffer protocol (host memory).
+                    // For documentation of the second argument see
+                    // https://pybind11.readthedocs.io/en/stable/advanced/pycpp/numpy.html#arrays
+                    /* Request a buffer descriptor from Python */                    
                     auto b = py::array_t<ValueType,
                                          py::array::c_style |
                                              py::array::forcecast>(obj);
