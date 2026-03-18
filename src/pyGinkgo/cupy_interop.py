@@ -12,10 +12,7 @@ The primary mechanism uses ``__cuda_array_interface__`` (CAI v3) for
 direct GPU memory sharing between CuPy and Ginkgo's CUDA executor
 objects.
 
-When CAI is not available (e.g., CPU arrays or non-CUDA builds),
-a fallback path through host memory is used.
-
-Basic interop (no imports from this module required):
+Dense / 1-D arrays (no imports from this module required):
     CuPy dense arrays and Ginkgo dense / array objects interoperate
     through the standard constructor and ``cupy.asarray`` paths,
     mirroring the pattern used by PyTorch::
@@ -32,15 +29,24 @@ Basic interop (no imports from this module required):
     stays valid.  On non-CUDA executors or when dtype conversion is
     needed, data is copied through host memory automatically.
 
-Zero-copy helpers (advanced):
-    For users who need zero-copy CuPy → Ginkgo transfers on CUDA
-    devices, this module provides standalone conversion functions::
-
-        from pyGinkgo.cupy_interop import from_cupy_to_gko_array
-        gko_arr = from_cupy_to_gko_array(cp_arr, executor)
+Sparse matrices (import from this module):
+    CuPy sparse matrices (CSR / COO) require explicit conversion
+    functions because they consist of multiple component arrays::
 
         from pyGinkgo.cupy_interop import from_cupy_csr_to_gko
         gko_csr = from_cupy_csr_to_gko(cp_csr, executor)
+
+        from pyGinkgo.cupy_interop import gko_csr_to_cupy
+        cp_csr = gko_csr_to_cupy(gko_csr)
+
+    The C++ ``from_device_ptrs`` factory wraps the CuPy component
+    arrays (values, col indices, row pointers / row indices) as
+    non-owning ``gko::array::view`` objects.  This is true zero-copy;
+    ``py::keep_alive`` prevents garbage-collection of the source CuPy
+    arrays while the Ginkgo matrix is alive.
+
+    When the C++ CUDA path is unavailable the data is copied through
+    host memory as a fallback.
 
 Design rationale (``__cuda_array_interface__`` vs DLPack):
     We chose ``__cuda_array_interface__`` because:
@@ -51,27 +57,6 @@ Design rationale (``__cuda_array_interface__`` vs DLPack):
 
     DLPack is a candidate for future work to provide a universal protocol
     that also covers HIP/ROCm and SYCL/DPC++ backends.
-
-Output (Ginkgo → CuPy):
-    Ginkgo arrays and dense matrices on a CUDA executor expose
-    ``__cuda_array_interface__``, so ``cupy.asarray(gko_obj)`` creates
-    a zero-copy view directly into Ginkgo-managed GPU memory.
-
-Input (CuPy → Ginkgo):
-    **Dense / 1-D arrays** – the helpers read the CuPy array's
-    ``__cuda_array_interface__``, extract the device pointer, and call
-    the C++ ``from_device_ptr`` factory to perform a fast
-    device-to-device copy into Ginkgo-owned memory.
-
-    **Sparse matrices (CSR / COO)** – the C++ ``from_device_ptrs``
-    factory wraps the CuPy component arrays (values, col indices,
-    row pointers / row indices) as non-owning ``gko::array::view``
-    objects.  This is true zero-copy; ``py::keep_alive`` prevents
-    garbage-collection of the source CuPy arrays while the Ginkgo
-    matrix is alive.
-
-    When the C++ CUDA path is unavailable the data is copied through
-    host memory as a fallback.
 """
 
 import numpy as np
@@ -138,105 +123,6 @@ def _gko_class_dtypes(gko_obj):
     if len(parts) < 3:
         return None, None
     return _GKO_VALUE_TO_NP.get(parts[1]), _GKO_INDEX_TO_NP.get(parts[2])
-
-
-def _cupy_dtype_to_gko_dtype(cupy_arr) -> str:
-    """Map a CuPy array's dtype to a Ginkgo dtype string."""
-    gko_dtype = _NP_TO_GKO_DTYPE.get(cupy_arr.dtype)
-    if gko_dtype is None:
-        raise TypeError(
-            f"Unsupported CuPy dtype for Ginkgo conversion: {cupy_arr.dtype}"
-        )
-    return gko_dtype
-
-
-def _cupy_value_dtype(cupy_arr) -> str:
-    """Map a CuPy array's value dtype to a Ginkgo value-type string."""
-    gko_dtype = _NP_TO_GKO_VALUE_DTYPE.get(cupy_arr.dtype)
-    if gko_dtype is None:
-        raise TypeError(
-            f"Unsupported CuPy value dtype for Ginkgo: {cupy_arr.dtype}"
-        )
-    return gko_dtype
-
-
-def _cupy_index_dtype(cupy_arr) -> str:
-    """Map a CuPy array's index dtype to a Ginkgo index-type string."""
-    gko_dtype = _NP_TO_GKO_INDEX_DTYPE.get(cupy_arr.dtype)
-    if gko_dtype is None:
-        raise TypeError(
-            f"Unsupported CuPy index dtype for Ginkgo: {cupy_arr.dtype}"
-        )
-    return gko_dtype
-
-
-# ------------------------------------------------------------------
-# CuPy dense / array  →  Ginkgo
-# ------------------------------------------------------------------
-
-def from_cupy_to_gko_array(cupy_arr, executor, dtype: Optional[str] = None):
-    """Create a Ginkgo 1-D array from a CuPy array."""
-    from pyGinkgo import pyGinkgoBindings as pGB
-
-    if not is_cupy_array(cupy_arr):
-        raise TypeError("Expected a CuPy ndarray")
-
-    if cupy_arr.ndim != 1:
-        raise ValueError("Only 1-D CuPy arrays can be converted to gko arrays")
-
-    if not cupy_arr.flags["C_CONTIGUOUS"]:
-        cupy_arr = cupy.ascontiguousarray(cupy_arr)
-
-    if dtype is None:
-        dtype = _cupy_dtype_to_gko_dtype(cupy_arr)
-
-    array_cls = getattr(pGB.base, "array_" + dtype)
-
-    # Fast path: use from_device_ptr (device-to-device copy, no host round-trip)
-    if hasattr(array_cls, "from_device_ptr"):
-        cai = cupy_arr.__cuda_array_interface__
-        ptr = cai["data"][0]
-        size = cai["shape"][0]
-        return array_cls.from_device_ptr(executor, ptr, size)
-
-    # Fallback: copy through host memory
-    np_array = cupy.asnumpy(cupy_arr)
-    return array_cls(executor, np_array)
-
-
-def from_cupy_to_gko_dense(cupy_arr, executor, dtype: Optional[str] = None):
-    """Create a Ginkgo dense matrix from a CuPy array."""
-    from pyGinkgo import pyGinkgoBindings as pGB
-
-    if not is_cupy_array(cupy_arr):
-        raise TypeError("Expected a CuPy ndarray")
-
-    if cupy_arr.ndim not in (1, 2):
-        raise ValueError(
-            "Only 1-D or 2-D CuPy arrays can be converted to gko dense matrices"
-        )
-
-    if not cupy_arr.flags["C_CONTIGUOUS"]:
-        cupy_arr = cupy.ascontiguousarray(cupy_arr)
-
-    if dtype is None:
-        dtype = _cupy_value_dtype(cupy_arr)
-
-    dense_cls = getattr(pGB.matrix, "dense_" + dtype)
-
-    # Fast path: use from_device_ptr (device-to-device copy, no host round-trip)
-    if hasattr(dense_cls, "from_device_ptr"):
-        cai = cupy_arr.__cuda_array_interface__
-        ptr = cai["data"][0]
-        shape = cai["shape"]
-        rows = shape[0]
-        cols = shape[1] if len(shape) > 1 else 1
-        stride = cols  # C-contiguous
-        return dense_cls.from_device_ptr(executor, ptr, rows, cols, stride)
-
-    # Fallback: copy through host memory
-    np_array = cupy.asnumpy(cupy_arr)
-    return dense_cls(executor, np_array)
 
 
 # ------------------------------------------------------------------
@@ -322,27 +208,8 @@ def from_cupy_coo_to_gko(
 
 
 # ------------------------------------------------------------------
-# Ginkgo  →  CuPy
+# Ginkgo sparse  →  CuPy sparse
 # ------------------------------------------------------------------
-
-def gko_to_cupy(gko_obj):
-    """Convert a Ginkgo array or dense matrix to a CuPy array."""
-    if not cupy_avail:
-        raise ImportError(
-            "CuPy is required for converting Ginkgo objects to CuPy arrays. "
-            "Install it with: pip install cupy-cuda12x"
-        )
-
-    # Zero-copy path via __cuda_array_interface__
-    if hasattr(gko_obj, "__cuda_array_interface__"):
-        return cupy.asarray(gko_obj)
-
-    # Fallback: copy through host
-    if hasattr(gko_obj, "copy_to_host"):
-        host_obj = gko_obj.copy_to_host()
-        return cupy.asarray(np.array(host_obj))
-
-    return cupy.asarray(np.array(gko_obj))
 
 
 def gko_csr_to_cupy(gko_csr):
