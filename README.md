@@ -25,6 +25,7 @@ The tests successfully run on the following Python versions:
 - Pybind11
 - Ninja # if you want to use cmake presets
 - [pybind11-stubgen](https://pypi.org/project/pybind11-stubgen/) # if you want to use [stubs generation](#stubs-generation)
+- [CuPy](https://cupy.dev/) # optional, for zero-copy GPU interoperability (see [CuPy Interoperability](#cupy-interoperability))
 
 ### Building the module via CMake
 
@@ -119,28 +120,123 @@ This will generate the stubs for the C++ code in the `pyGinkgoBindings` module i
 
 Usage examples can be found in [examples](examples) directory. Here's a simple example demonstrating how to use pyGinkgo to perform sparse matrix-vector multiplication:
 
-```
+```python
 import pyGinkgo as pg
 import numpy as np
 
 # Device initialization
-dev = pg.device ( "cuda" )
+dev = pg.device("cuda")
 
 # Initialize matrix and tensors
 fn = 'm1.mtx'
 
-A = pg.read ( device = dev , path = fn , dtype = "double" , format = "Csr" )
+A = pg.read(device=dev, path=fn, dtype="double", format="Csr")
 n_rows = A.shape[0]
 
-b = pg.as_tensor (
-device = dev , dim =( n_rows ,1) , dtype = "double" , fill =1.0)
+b = pg.as_tensor(device=dev, dim=(n_rows, 1), dtype="double", fill=1.0)
 
-x = pg.as_tensor (
-device = dev , dim =( n_rows ,1) , dtype = "double" , fill =0.0)
+x = pg.as_tensor(device=dev, dim=(n_rows, 1), dtype="double", fill=0.0)
 
 # Sparse Matrix Vector Product
-A.apply (b , x )
+A.apply(b, x)
+```
 
+## CuPy Interoperability
+
+pyGinkgo supports zero-copy data exchange with [CuPy](https://cupy.dev/) on CUDA devices, eliminating unnecessary device-host-device memory transfers. This is especially useful when you are already working primarily on the GPU with CuPy and want to use Ginkgo's solvers without paying the cost of copying data back and forth.
+
+The interoperability uses the [`__cuda_array_interface__`](https://numba.readthedocs.io/en/stable/cuda/cuda_array_interface.html) (CAI v3) protocol, which is CuPy's native mechanism for sharing GPU memory. No special wrapper module is needed — the standard constructors and `cupy.asarray()` handle everything.
+
+### Conversion Summary
+
+| Path | Mechanism | Zero-copy? |
+|------|-----------|:----------:|
+| CuPy array/dense → Ginkgo | Constructor detects `__cuda_array_interface__` | ✅ |
+| CuPy CSR/COO → Ginkgo | Constructor duck-types on `.data`/`.indices`/`.indptr` | ✅ |
+| Ginkgo array/dense → CuPy | `cupy.asarray()` via `__cuda_array_interface__` | ✅ |
+| Ginkgo CSR/COO → CuPy | `.data`/`.indices`/`.indptr` properties + `cupy.asarray()` | ✅ |
+
+When pyGinkgo is built without CUDA support, conversions fall back transparently to copying through host memory.
+
+### CuPy Examples
+
+#### Dense arrays — zero-copy in both directions
+
+```python
+import cupy
+import pyGinkgo.pyGinkgoBindings as pGB
+
+executor = pGB.CudaExecutor()
+
+# CuPy → Ginkgo (zero-copy view via __cuda_array_interface__)
+cp_arr = cupy.array([1.0, 2.0, 3.0], dtype=cupy.float64)
+gko_arr = pGB.base.array_double(executor, cp_arr)
+
+cp_mat = cupy.array([[1, 2], [3, 4]], dtype=cupy.float64)
+gko_dense = pGB.matrix.dense_double(executor, cp_mat)
+
+# Ginkgo → CuPy (zero-copy view via __cuda_array_interface__)
+result = cupy.asarray(gko_arr)
+```
+
+#### Sparse matrices — zero-copy via constructor
+
+```python
+import cupy
+import cupyx.scipy.sparse as sp
+import pyGinkgo.pyGinkgoBindings as pGB
+
+executor = pGB.CudaExecutor()
+
+# CuPy CSR → Ginkgo CSR (zero-copy, duck-types on .data/.indices/.indptr)
+A_cupy = sp.csr_matrix(cupy.eye(3, dtype=cupy.float64))
+A_gko = pGB.matrix.Csr_double_int32(executor, A_cupy)
+
+# Ginkgo CSR → CuPy CSR (zero-copy via component array properties)
+A_back = sp.csr_matrix(
+    (cupy.asarray(A_gko.data), cupy.asarray(A_gko.indices), cupy.asarray(A_gko.indptr)),
+    shape=A_gko.shape,
+)
+```
+
+#### Solving a linear system with GMRES using CuPy data
+
+```python
+import cupy
+import cupyx.scipy.sparse as sp
+import pyGinkgo as pg
+import pyGinkgo.pyGinkgoBindings as pGB
+
+# Build a sparse system entirely on the GPU
+n = 100
+diag = 2.0 * cupy.ones(n, dtype=cupy.float64)
+off  = -1.0 * cupy.ones(n - 1, dtype=cupy.float64)
+A_cupy = sp.csr_matrix(
+    cupy.diag(diag) + cupy.diag(off, 1) + cupy.diag(off, -1)
+)
+b_cupy = cupy.ones(n, dtype=cupy.float64)
+
+# Wrap CuPy data for Ginkgo — all zero-copy
+executor = pGB.CudaExecutor()
+A_gko = pGB.matrix.Csr_double_int32(executor, A_cupy)
+b_gko = pGB.matrix.dense_double(executor, b_cupy)
+
+# Allocate solution vector on the GPU
+x_gko = pGB.matrix.dense_double(executor, (n, 1))
+x_gko.fill(0.0)
+
+# Solve with GMRES
+solver_args = {
+    "type": "solver::Gmres",
+    "criteria": [
+        {"type": "Iteration", "max_iters": 200},
+        {"type": "ResidualNorm", "reduction_factor": 1e-10},
+    ],
+}
+_, x_gko = pg.solve(A_gko, b_gko, x_gko, solver_args=solver_args)
+
+# Get the result back as a CuPy array — zero-copy
+x_cupy = cupy.asarray(x_gko)
 ```
 
 ## Benchmarking

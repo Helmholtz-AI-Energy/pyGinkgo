@@ -31,7 +31,7 @@ def as_array(obj, device: gko_types.DeviceType = "cpu", dtype="float"):
         )
     
     executor = pg.device(device)
-    
+
     array_cls = getattr(pGB.base, "array_" + dtype)
     return array_cls(executor, obj)
 

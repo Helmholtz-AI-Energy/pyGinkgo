@@ -44,6 +44,7 @@ endif()
 # Find  Ginkgo find_package(Ginkgo 1.7.0 QUIET)
 find_package(ginkgo QUIET)
 
+set(_gko_fetchcontent_targets "")
 # Fetch Ginkgo if not found
 if(NOT ginkgo_FOUND)
   # If not found, fetch Ginkgo
@@ -63,6 +64,44 @@ if(NOT ginkgo_FOUND)
     GIT_TAG develop
     EXCLUDE_FROM_ALL)
   FetchContent_MakeAvailable(ginkgo)
+
+  # Place Ginkgo shared libraries next to pyGinkgoBindings in the build
+  # tree so the virtual-installation folder is self-contained, and set
+  # RPATH so the libraries can find each other after installation.
+  set(_gko_fetchcontent_targets "")
+  foreach(_gko_target ginkgo ginkgo_device ginkgo_reference ginkgo_omp
+                      ginkgo_cuda ginkgo_hip ginkgo_dpcpp)
+    if(TARGET ${_gko_target})
+      list(APPEND _gko_fetchcontent_targets ${_gko_target})
+      # Direct build output into the package folder (handles versioned
+      # SO names like libginkgo.so.1.12.0).  Set the per-config variant
+      # too so that Release/Debug/etc. builds all land in the same place.
+      set_target_properties(${_gko_target} PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+      )
+      # Allow install(TARGETS) to work for FetchContent targets that
+      # inherit EXCLUDE_FROM_ALL from their subdirectory.
+      set_target_properties(${_gko_target} PROPERTIES
+        EXCLUDE_FROM_ALL FALSE
+      )
+      if(APPLE)
+        set_target_properties(${_gko_target} PROPERTIES
+          INSTALL_RPATH "@loader_path"
+        )
+      else()
+        set_target_properties(${_gko_target} PROPERTIES
+          INSTALL_RPATH "$ORIGIN"
+        )
+      endif()
+    endif()
+  endforeach()
 endif()
 
 # Pass build type down to c++ macro: https://stackoverflow.com/a/9017635/8302811
@@ -85,6 +124,19 @@ target_include_directories(pyGinkgoBindings
 target_link_libraries(pyGinkgoBindings PRIVATE Ginkgo::ginkgo)
 target_link_libraries(pyGinkgoBindings PUBLIC nlohmann_json::nlohmann_json)
 set_property(TARGET pyGinkgoBindings PROPERTY CXX_STANDARD 14)
+
+# Set RPATH so pyGinkgoBindings can find Ginkgo shared libraries installed
+# alongside it without needing to set LD_LIBRARY_PATH manually.
+if(APPLE)
+  set_target_properties(pyGinkgoBindings PROPERTIES
+    MACOSX_RPATH TRUE
+    INSTALL_RPATH "@loader_path"
+  )
+else()
+  set_target_properties(pyGinkgoBindings PROPERTIES
+    INSTALL_RPATH "$ORIGIN"
+  )
+endif()
 
 # Disable false positive warnings from GCC (>= 12.4 and <
 # 13)(https://gcc.gnu.org/bugzilla/show_bug.cgi?id=115824 and
@@ -176,22 +228,32 @@ include(CTest) # https://cmake.org/pipermail/cmake/2015-January/059742.html -
 add_subdirectory(tests/cpp_bindings)
 add_subdirectory(tests/pyGinkgo)
 
-if(APPLE)
-  set(CMAKE_MACOSX_RPATH 1)
-endif()
-set(CMAKE_INSTALL_RPATH ${Python_SITELIB}/${PROJECT_NAME})
-
-message(STATUS "Install path: ${Python_SITELIB}")
+# Install the self-contained package folder.  Use a *relative*
+# DESTINATION so that the path is resolved under CMAKE_INSTALL_PREFIX
+# (which py-build-cmake sets to a temporary staging directory when
+# building a wheel).  Using an absolute path like ${Python_SITELIB}
+# would bypass the prefix and the files would never end up in the wheel.
 install(DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
-        DESTINATION ${Python_SITELIB})
-install(
-  IMPORTED_RUNTIME_ARTIFACTS
-  ginkgo
-  ginkgo_device
-  ginkgo_hip
-  ginkgo_cuda
-  ginkgo_omp
-  ginkgo_dpcpp
-  ginkgo_reference
-  DESTINATION
-  ${Python_SITELIB}/${PROJECT_NAME})
+        DESTINATION .)
+# Install Ginkgo shared libraries into the package directory.
+# FetchContent targets are regular targets (install via TARGETS);
+# pre-installed Ginkgo provides IMPORTED targets (install via
+# IMPORTED_RUNTIME_ARTIFACTS).
+if(_gko_fetchcontent_targets)
+  install(
+    TARGETS ${_gko_fetchcontent_targets}
+    LIBRARY DESTINATION ${PROJECT_NAME}
+    RUNTIME DESTINATION ${PROJECT_NAME})
+else()
+  install(
+    IMPORTED_RUNTIME_ARTIFACTS
+    ginkgo
+    ginkgo_device
+    ginkgo_hip
+    ginkgo_cuda
+    ginkgo_omp
+    ginkgo_dpcpp
+    ginkgo_reference
+    DESTINATION
+    ${PROJECT_NAME})
+endif()

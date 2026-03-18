@@ -18,6 +18,21 @@ void check_buffer_dtype(const py::buffer_info &info)
 }
 
 /**
+ * Returns a NumPy-style dtype string for the given ValueType,
+ * used by the __cuda_array_interface__ protocol.
+ *
+ * For example: float -> "<f4", double -> "<f8", half -> "<f2"
+ */
+template <typename ValueType>
+std::string get_cuda_array_typestr()
+{
+    auto np = py::module_::import("numpy");
+    return np.attr("dtype")(py::format_descriptor<ValueType>::format())
+        .attr("str")
+        .template cast<std::string>();
+}
+
+/**
  * Instantiates a template for each non-complex value type compiled by Ginkgo.
  *
  * @param _macro  A macro which expands the template instantiation
