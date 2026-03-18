@@ -20,11 +20,17 @@ Basic interop (no imports from this module required):
     through the standard constructor and ``cupy.asarray`` paths,
     mirroring the pattern used by PyTorch::
 
-        # CuPy → Ginkgo (via __array__(), copies through host)
-        gko_arr = array_cls(executor, cp_arr)
+        # CuPy → Ginkgo (zero-copy view via __cuda_array_interface__)
+        gko_arr = array_cls(cuda_executor, cp_arr)
 
-        # Ginkgo → CuPy (zero-copy via __cuda_array_interface__)
+        # Ginkgo → CuPy (zero-copy view via __cuda_array_interface__)
         cp_arr = cupy.asarray(gko_obj)
+
+    Both directions are zero-copy when the executor is a CUDA executor
+    and the array dtype matches.  The source object's lifetime is tied
+    to the Ginkgo object via ``py::keep_alive``, so the device memory
+    stays valid.  On non-CUDA executors or when dtype conversion is
+    needed, data is copied through host memory automatically.
 
 Zero-copy helpers (advanced):
     For users who need zero-copy CuPy → Ginkgo transfers on CUDA

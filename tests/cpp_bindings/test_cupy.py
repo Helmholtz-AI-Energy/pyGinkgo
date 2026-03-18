@@ -552,6 +552,112 @@ class TestSolverWorkflow:
         assert x_cp.dtype == dtype
 
 
+# ---- Direct constructor interop (basic interop via CAI) ----------------
+
+@skip_no_cupy
+@skip_no_cuda
+class TestDirectConstructor:
+    """Test that the standard array/dense constructors detect
+    __cuda_array_interface__ on CUDA executors and create zero-copy
+    views, just as cupy.asarray(gko_obj) does in the reverse direction.
+    """
+
+    @pytest.mark.parametrize("dtype", ["float", "double"])
+    def test_array_constructor_with_cupy(self, dtype):
+        """array_cls(cuda_exec, cupy_arr) creates a gko array."""
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        cp_dtype = cupy.float32 if dtype == "float" else cupy.float64
+        executor = pGB.CudaExecutor()
+        array_cls = getattr(pGB.base, "array_" + dtype)
+
+        cp_arr = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=cp_dtype)
+        gko_arr = array_cls(executor, cp_arr)
+        assert gko_arr.shape == (5,)
+
+    @pytest.mark.parametrize("dtype", ["float", "double"])
+    def test_array_constructor_zero_copy(self, dtype):
+        """Verify that the device pointer is the same (zero-copy)."""
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        cp_dtype = cupy.float32 if dtype == "float" else cupy.float64
+        executor = pGB.CudaExecutor()
+        array_cls = getattr(pGB.base, "array_" + dtype)
+
+        cp_arr = cupy.array([10.0, 20.0, 30.0], dtype=cp_dtype)
+        gko_arr = array_cls(executor, cp_arr)
+
+        cp_ptr = cp_arr.__cuda_array_interface__["data"][0]
+        gko_ptr = gko_arr.__cuda_array_interface__["data"][0]
+        assert cp_ptr == gko_ptr
+
+    @pytest.mark.parametrize("dtype", ["float", "double"])
+    def test_dense_constructor_1d(self, dtype):
+        """dense_cls(cuda_exec, cupy_1d) creates a gko dense."""
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        cp_dtype = cupy.float32 if dtype == "float" else cupy.float64
+        executor = pGB.CudaExecutor()
+        dense_cls = getattr(pGB.matrix, "dense_" + dtype)
+
+        cp_arr = cupy.array([1.0, 2.0, 3.0], dtype=cp_dtype)
+        dense = dense_cls(executor, cp_arr)
+        assert dense.shape == (3, 1)
+
+    def test_dense_constructor_2d(self):
+        """dense_cls(cuda_exec, cupy_2d) creates a gko dense."""
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        executor = pGB.CudaExecutor()
+        dense_cls = getattr(pGB.matrix, "dense_double")
+
+        cp_arr = cupy.array([[1, 2], [3, 4], [5, 6]], dtype=cupy.float64)
+        dense = dense_cls(executor, cp_arr)
+        assert dense.shape == (3, 2)
+
+    @pytest.mark.parametrize("dtype", ["float", "double"])
+    def test_dense_constructor_zero_copy(self, dtype):
+        """Verify that the device pointer is the same (zero-copy)."""
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        cp_dtype = cupy.float32 if dtype == "float" else cupy.float64
+        executor = pGB.CudaExecutor()
+        dense_cls = getattr(pGB.matrix, "dense_" + dtype)
+
+        cp_arr = cupy.array([[1, 2], [3, 4]], dtype=cp_dtype)
+        dense = dense_cls(executor, cp_arr)
+
+        cp_ptr = cp_arr.__cuda_array_interface__["data"][0]
+        gko_ptr = dense.__cuda_array_interface__["data"][0]
+        assert cp_ptr == gko_ptr
+
+    def test_array_roundtrip_via_constructor(self):
+        """CuPy → array_cls → cupy.asarray roundtrip."""
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        executor = pGB.CudaExecutor()
+        array_cls = getattr(pGB.base, "array_double")
+
+        original = cupy.array([1.0, 2.0, 3.0, 4.0], dtype=cupy.float64)
+        gko_arr = array_cls(executor, original)
+        roundtripped = cupy.asarray(gko_arr)
+        cupy.testing.assert_array_almost_equal(original, roundtripped)
+
+    def test_dense_roundtrip_via_constructor(self):
+        """CuPy → dense_cls → cupy.asarray roundtrip."""
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        executor = pGB.CudaExecutor()
+        dense_cls = getattr(pGB.matrix, "dense_float")
+
+        original = cupy.array([[1, 2], [3, 4]], dtype=cupy.float32)
+        dense = dense_cls(executor, original)
+        roundtripped = cupy.asarray(dense)
+        cupy.testing.assert_array_almost_equal(
+            original.ravel(), roundtripped.ravel()
+        )
+
+
 # ---- Edge cases / error handling ---------------------------------------
 
 @skip_no_cupy

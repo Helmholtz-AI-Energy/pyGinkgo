@@ -20,12 +20,49 @@ void init_array(py::module_ &module, const std::string typestr)
                           gko::array<ValueType> &>())
             .def(py::init(
                 [](std::shared_ptr<gko::Executor> exec,
-                   py::array_t<ValueType,
-                               py::array::c_style | py::array::forcecast>
-                       b) {
-                    // for documentation of the second argument see
-                    // https://pybind11.readthedocs.io/en/stable/advanced/pycpp/numpy.html#arrays
-                    /* Request a buffer descriptor from Python */
+                   py::object obj) {
+#ifdef GINKGO_BUILD_CUDA
+                    // Fast path: if the input exposes
+                    // __cuda_array_interface__ and the executor is a
+                    // CUDA executor, create a zero-copy view instead
+                    // of going through host memory.
+                    // py::keep_alive<1,3> ensures the source object
+                    // stays alive while this array exists.
+                    if (py::hasattr(obj, "__cuda_array_interface__") &&
+                        std::dynamic_pointer_cast<const gko::CudaExecutor>(
+                            exec)) {
+                        auto cai =
+                            obj.attr("__cuda_array_interface__")
+                                .cast<py::dict>();
+                        auto shape = cai["shape"].cast<py::tuple>();
+                        if (py::len(shape) != 1) {
+                            throw std::runtime_error(
+                                "Only 1D arrays are supported");
+                        }
+                        auto typestr =
+                            cai["typestr"].cast<std::string>();
+                        auto expected =
+                            get_cuda_array_typestr<ValueType>();
+                        if (typestr != expected) {
+                            throw std::runtime_error(
+                                "dtype mismatch: "
+                                "__cuda_array_interface__ reports '" +
+                                typestr +
+                                "' but this array type expects '" +
+                                expected + "'");
+                        }
+                        auto data = cai["data"].cast<py::tuple>();
+                        auto ptr = data[0].cast<uintptr_t>();
+                        auto size = shape[0].cast<size_t>();
+                        return gko::array<ValueType>::view(
+                            exec, size,
+                            reinterpret_cast<ValueType *>(ptr));
+                    }
+#endif
+                    // Fallback: use buffer protocol (host memory)
+                    auto b = py::array_t<ValueType,
+                                         py::array::c_style |
+                                             py::array::forcecast>(obj);
                     py::buffer_info info = b.request();
                     check_buffer_dtype<ValueType>(info);
 
@@ -38,7 +75,8 @@ void init_array(py::module_ &module, const std::string typestr)
                     return gko::array<ValueType>(
                         exec, (ValueType *)info.ptr,
                         (ValueType *)info.ptr + elems);
-                }))
+                }),
+                py::keep_alive<1, 3>())
             .def_buffer([](gko::array<ValueType> &a) -> py::buffer_info {
                 return py::buffer_info(
                     a.get_data(),      /* Pointer to buffer */
