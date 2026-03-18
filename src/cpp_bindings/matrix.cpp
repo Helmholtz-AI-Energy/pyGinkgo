@@ -82,6 +82,108 @@ void init_matrix(py::module_ &module, const std::string matrix_type,
                                 dim[1].cast<size_t>()},
                     data_view, cols_view, rows_view));
             }))
+            // Constructor from a sparse-matrix-like object.
+            // CSR: expects .data, .indices, .indptr, .shape
+            // COO: expects .data, .col, .row, .shape
+            // On CUDA executors with __cuda_array_interface__
+            // components, this is zero-copy.  Otherwise the component
+            // arrays are copied through the buffer protocol.
+            .def(py::init(
+                [](std::shared_ptr<gko::Executor> exec, py::object obj) {
+                    if (!py::hasattr(obj, "data") ||
+                        !py::hasattr(obj, "shape")) {
+                        throw std::runtime_error(
+                            "Object must have 'data' and 'shape' "
+                            "attributes");
+                    }
+
+                    auto shape_t = obj.attr("shape").cast<py::tuple>();
+                    auto rows = shape_t[0].cast<size_t>();
+                    auto cols = shape_t[1].cast<size_t>();
+
+                    auto data_obj = obj.attr("data");
+                    py::object col_obj;
+                    py::object row_obj;
+
+                    if constexpr (std::is_same_v<
+                                      MatrixType<ValueType, IndexType>,
+                                      gko::matrix::Csr<ValueType,
+                                                        IndexType>>) {
+                        if (!py::hasattr(obj, "indices") ||
+                            !py::hasattr(obj, "indptr")) {
+                            throw std::runtime_error(
+                                "CSR-like object must have "
+                                "'indices' and 'indptr' "
+                                "attributes");
+                        }
+                        col_obj = obj.attr("indices");
+                        row_obj = obj.attr("indptr");
+                    } else {
+                        if (!py::hasattr(obj, "col") ||
+                            !py::hasattr(obj, "row")) {
+                            throw std::runtime_error(
+                                "COO-like object must have "
+                                "'col' and 'row' attributes");
+                        }
+                        col_obj = obj.attr("col");
+                        row_obj = obj.attr("row");
+                    }
+
+#ifdef GINKGO_BUILD_CUDA
+                    if (py::hasattr(data_obj,
+                                    "__cuda_array_interface__") &&
+                        std::dynamic_pointer_cast<
+                            const gko::CudaExecutor>(exec)) {
+                        auto [vals_ptr, nnz] =
+                            cai_ptr_and_size<ValueType>(data_obj);
+                        auto [cols_ptr, cols_n] =
+                            cai_ptr_and_size<IndexType>(col_obj);
+                        auto [rows_ptr, rows_n] =
+                            cai_ptr_and_size<IndexType>(row_obj);
+
+                        return gko::share(
+                            MatrixType<ValueType, IndexType>::create(
+                                exec, gko::dim<2>{rows, cols},
+                                gko::array<ValueType>::view(
+                                    exec, nnz, vals_ptr),
+                                gko::array<IndexType>::view(
+                                    exec, cols_n, cols_ptr),
+                                gko::array<IndexType>::view(
+                                    exec, rows_n, rows_ptr)));
+                    }
+#endif
+                    // Fallback: copy via buffer protocol
+                    auto data_buf =
+                        py::array_t<ValueType,
+                                    py::array::c_style |
+                                        py::array::forcecast>(data_obj);
+                    auto cols_buf =
+                        py::array_t<IndexType,
+                                    py::array::c_style |
+                                        py::array::forcecast>(col_obj);
+                    auto rows_buf =
+                        py::array_t<IndexType,
+                                    py::array::c_style |
+                                        py::array::forcecast>(row_obj);
+
+                    auto ref = gko::ReferenceExecutor::create();
+                    py::buffer_info di = data_buf.request();
+                    py::buffer_info ci = cols_buf.request();
+                    py::buffer_info ri = rows_buf.request();
+
+                    auto dv = gko::array<ValueType>::view(
+                        ref, di.shape[0], (ValueType *)di.ptr);
+                    auto cv = gko::array<IndexType>::view(
+                        ref, ci.shape[0], (IndexType *)ci.ptr);
+                    auto rv = gko::array<IndexType>::view(
+                        ref, ri.shape[0], (IndexType *)ri.ptr);
+
+                    return gko::share(
+                        MatrixType<ValueType, IndexType>::create(
+                            exec, gko::dim<2>{rows, cols},
+                            dv, cv, rv));
+                }),
+                py::keep_alive<1, 3>())
             .def("__repr__",
                  [=](const MatrixType<ValueType, IndexType> &o) {
                      return matrix_type_repr;
@@ -134,6 +236,68 @@ void init_matrix(py::module_ &module, const std::string matrix_type,
                     return dense;
                 },
                 "Returns dense representation of the matrix");
+
+    // Component array properties (scipy / CuPy compatible names).
+    // These return non-owning gko::array views into the sparse
+    // matrix's internal storage.  On CUDA executors the returned
+    // arrays expose __cuda_array_interface__; on CPU they support
+    // the buffer protocol.  py::keep_alive<0,1> ensures the sparse
+    // matrix stays alive while the view exists.
+
+    cls.def_property_readonly(
+        "data",
+        [](MatrixType<ValueType, IndexType> &m) {
+            return gko::array<ValueType>::view(
+                m.get_executor(), m.get_num_stored_elements(),
+                m.get_values());
+        },
+        py::keep_alive<0, 1>(),
+        "Non-owning array view of stored values (nnz elements).");
+
+    if constexpr (std::is_same_v<MatrixType<ValueType, IndexType>,
+                                 gko::matrix::Csr<ValueType, IndexType>>) {
+        cls.def_property_readonly(
+            "indices",
+            [](gko::matrix::Csr<ValueType, IndexType> &m) {
+                return gko::array<IndexType>::view(
+                    m.get_executor(), m.get_num_stored_elements(),
+                    m.get_col_idxs());
+            },
+            py::keep_alive<0, 1>(),
+            "Non-owning array view of column indices (nnz elements).");
+
+        cls.def_property_readonly(
+            "indptr",
+            [](gko::matrix::Csr<ValueType, IndexType> &m) {
+                auto n_rows = m.get_size()[0];
+                return gko::array<IndexType>::view(
+                    m.get_executor(), n_rows + 1,
+                    m.get_row_ptrs());
+            },
+            py::keep_alive<0, 1>(),
+            "Non-owning array view of row pointers "
+            "(n_rows + 1 elements).");
+    } else {
+        cls.def_property_readonly(
+            "col",
+            [](gko::matrix::Coo<ValueType, IndexType> &m) {
+                return gko::array<IndexType>::view(
+                    m.get_executor(), m.get_num_stored_elements(),
+                    m.get_col_idxs());
+            },
+            py::keep_alive<0, 1>(),
+            "Non-owning array view of column indices (nnz elements).");
+
+        cls.def_property_readonly(
+            "row",
+            [](gko::matrix::Coo<ValueType, IndexType> &m) {
+                return gko::array<IndexType>::view(
+                    m.get_executor(), m.get_num_stored_elements(),
+                    m.get_row_idxs());
+            },
+            py::keep_alive<0, 1>(),
+            "Non-owning array view of row indices (nnz elements).");
+    }
 
 #ifdef GINKGO_BUILD_CUDA
     // -----------------------------------------------------------------

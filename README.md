@@ -152,10 +152,11 @@ The interoperability uses the [`__cuda_array_interface__`](https://numba.readthe
 | Path | Mechanism | Zero-copy? |
 |------|-----------|:----------:|
 | CuPy array/dense → Ginkgo | Constructor detects `__cuda_array_interface__` | ✅ |
-| CuPy CSR/COO → Ginkgo | `from_device_ptrs` (`gko::array::view`) | ✅ |
+| CuPy CSR/COO → Ginkgo | Constructor duck-types on `.data`/`.indices`/`.indptr` | ✅ |
 | Ginkgo array/dense → CuPy | `cupy.asarray()` via `__cuda_array_interface__` | ✅ |
+| Ginkgo CSR/COO → CuPy | `.data`/`.indices`/`.indptr` properties + `cupy.asarray()` | ✅ |
 
-When pyGinkgo is built without CUDA support, dense/array conversions fall back transparently to copying through host memory.
+When pyGinkgo is built without CUDA support, conversions fall back transparently to copying through host memory.
 
 ### CuPy Examples
 
@@ -178,7 +179,7 @@ gko_dense = pGB.matrix.dense_double(executor, cp_mat)
 result = cupy.asarray(gko_arr)
 ```
 
-#### Sparse matrices — zero-copy via `from_device_ptrs`
+#### Sparse matrices — zero-copy via constructor
 
 ```python
 import cupy
@@ -187,10 +188,14 @@ import pyGinkgo.pyGinkgoBindings as pGB
 
 executor = pGB.CudaExecutor()
 
-# CuPy CSR → Ginkgo CSR (zero-copy device views)
+# CuPy CSR → Ginkgo CSR (zero-copy, duck-types on .data/.indices/.indptr)
 A_cupy = sp.csr_matrix(cupy.eye(3, dtype=cupy.float64))
-A_gko = pGB.matrix.Csr_double_int32.from_device_ptrs(
-    executor, A_cupy.shape, A_cupy.data, A_cupy.indices, A_cupy.indptr,
+A_gko = pGB.matrix.Csr_double_int32(executor, A_cupy)
+
+# Ginkgo CSR → CuPy CSR (zero-copy via component array properties)
+A_back = sp.csr_matrix(
+    (cupy.asarray(A_gko.data), cupy.asarray(A_gko.indices), cupy.asarray(A_gko.indptr)),
+    shape=A_gko.shape,
 )
 ```
 
@@ -213,9 +218,7 @@ b_cupy = cupy.ones(n, dtype=cupy.float64)
 
 # Wrap CuPy data for Ginkgo — all zero-copy
 executor = pGB.CudaExecutor()
-A_gko = pGB.matrix.Csr_double_int32.from_device_ptrs(
-    executor, A_cupy.shape, A_cupy.data, A_cupy.indices, A_cupy.indptr,
-)
+A_gko = pGB.matrix.Csr_double_int32(executor, A_cupy)
 b_gko = pGB.matrix.dense_double(executor, b_cupy)
 
 # Allocate solution vector on the GPU
