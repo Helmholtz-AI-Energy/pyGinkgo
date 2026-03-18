@@ -579,7 +579,7 @@ class TestHighLevelAPI:
 class TestCuPyBridge:
     """Test executor-bound CuPyBridge API.
 
-    Mirrors the executor-centric pattern used by Hip / DpCpp where the
+    Mirrors the executor-centric pattern used by HIP / DPC++ where the
     executor drives array construction.
     """
 

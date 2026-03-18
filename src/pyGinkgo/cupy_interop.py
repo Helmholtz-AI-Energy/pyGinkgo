@@ -592,13 +592,13 @@ def gko_coo_to_cupy(gko_coo):
 
 
 # ------------------------------------------------------------------
-# Executor-bound CuPy bridge (aligned with Hip / DpCpp patterns)
+# Executor-bound CuPy bridge (aligned with HIP / DPC++ patterns)
 # ------------------------------------------------------------------
 
 class CuPyBridge:
     """Executor-bound interface for CuPy ↔ Ginkgo zero-copy conversions.
 
-    In the Hip and DpCpp backends, Ginkgo objects are constructed via
+    In the HIP and DPC++ backends, Ginkgo objects are constructed via
     the executor itself (``array_cls(executor, data)``).  ``CuPyBridge``
     brings CuPy conversions in line with that pattern by binding an
     executor once and exposing factory methods that mirror the standard
