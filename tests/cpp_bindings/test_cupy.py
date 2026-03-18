@@ -43,6 +43,7 @@ from pyGinkgo.cupy_interop import (
     gko_to_cupy,
     gko_csr_to_cupy,
     gko_coo_to_cupy,
+    CuPyBridge,
 )
 
 
@@ -569,6 +570,165 @@ class TestHighLevelAPI:
         coo = cupy_sparse.coo_matrix(cupy.eye(4, dtype=cupy.float32))
         gko_coo = pg.as_coo(coo, device="cuda")
         assert gko_coo.shape == (4, 4)
+
+
+# ---- CuPyBridge executor-bound API -----------------------------------
+
+@skip_no_cupy
+@skip_no_cuda
+class TestCuPyBridge:
+    """Test executor-bound CuPyBridge API.
+
+    Mirrors the executor-centric pattern used by Hip / DpCpp where the
+    executor drives array construction.
+    """
+
+    def test_create_from_executor(self):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        executor = pGB.CudaExecutor()
+        bridge = CuPyBridge(executor)
+        assert bridge.executor is executor
+
+    def test_create_from_device_string(self):
+        bridge = CuPyBridge("cuda")
+        assert bridge.executor is not None
+
+    def test_create_from_device_string_with_index(self):
+        bridge = CuPyBridge("cuda:0")
+        assert bridge.executor is not None
+
+    def test_rejects_invalid_type(self):
+        with pytest.raises(TypeError, match="Executor"):
+            CuPyBridge(42)
+
+    def test_importable_from_top_level(self):
+        import pyGinkgo as pg
+
+        assert hasattr(pg, "CuPyBridge")
+        assert pg.CuPyBridge is CuPyBridge
+
+    @pytest.mark.parametrize("dtype", ["float", "double"])
+    def test_array(self, dtype):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        cp_dtype = cupy.float32 if dtype == "float" else cupy.float64
+        bridge = CuPyBridge(pGB.CudaExecutor())
+
+        cp_arr = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=cp_dtype)
+        gko_arr = bridge.array(cp_arr, dtype=dtype)
+        assert gko_arr.shape == (5,)
+
+    def test_array_dtype_inference(self):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        cp_arr = cupy.array([10.0, 20.0], dtype=cupy.float64)
+        gko_arr = bridge.array(cp_arr)
+        assert gko_arr.shape == (2,)
+
+    @pytest.mark.parametrize("dtype", ["float", "double"])
+    def test_dense_1d(self, dtype):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        cp_dtype = cupy.float32 if dtype == "float" else cupy.float64
+        bridge = CuPyBridge(pGB.CudaExecutor())
+
+        cp_arr = cupy.array([1.0, 2.0, 3.0], dtype=cp_dtype)
+        dense = bridge.dense(cp_arr, dtype=dtype)
+        assert dense.shape == (3, 1)
+
+    def test_dense_2d(self):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        cp_arr = cupy.array([[1, 2], [3, 4], [5, 6]], dtype=cupy.float64)
+        dense = bridge.dense(cp_arr, dtype="double")
+        assert dense.shape == (3, 2)
+
+    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
+    @pytest.mark.parametrize("dtype", [cupy.float32, cupy.float64])
+    def test_csr(self, dtype):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        data = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)
+        indices = cupy.array([0, 2, 1, 0, 2], dtype=cupy.int32)
+        indptr = cupy.array([0, 2, 3, 5], dtype=cupy.int32)
+        csr = cupy_sparse.csr_matrix((data, indices, indptr), shape=(3, 3))
+
+        gko_csr = bridge.csr(csr)
+        assert gko_csr.shape == (3, 3)
+        assert gko_csr.get_num_stored_elements() == 5
+
+    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
+    @pytest.mark.parametrize("dtype", [cupy.float32, cupy.float64])
+    def test_coo(self, dtype):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        data = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=dtype)
+        row = cupy.array([0, 0, 1, 2, 2], dtype=cupy.int32)
+        col = cupy.array([0, 2, 1, 0, 2], dtype=cupy.int32)
+        coo = cupy_sparse.coo_matrix((data, (row, col)), shape=(3, 3))
+
+        gko_coo = bridge.coo(coo)
+        assert gko_coo.shape == (3, 3)
+        assert gko_coo.get_num_stored_elements() == 5
+
+    def test_to_cupy_array_roundtrip(self):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        original = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=cupy.float64)
+        gko_arr = bridge.array(original, dtype="double")
+
+        roundtripped = bridge.to_cupy(gko_arr)
+        cupy.testing.assert_array_almost_equal(original, roundtripped)
+
+    def test_to_cupy_dense_roundtrip(self):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        original = cupy.array([[1, 2], [3, 4]], dtype=cupy.float64)
+        dense = bridge.dense(original, dtype="double")
+
+        roundtripped = bridge.to_cupy(dense)
+        cupy.testing.assert_array_almost_equal(
+            original.ravel(), roundtripped.ravel()
+        )
+
+    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
+    def test_to_cupy_csr_roundtrip(self):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        data = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=cupy.float64)
+        indices = cupy.array([0, 2, 1, 0, 2], dtype=cupy.int32)
+        indptr = cupy.array([0, 2, 3, 5], dtype=cupy.int32)
+        original = cupy_sparse.csr_matrix((data, indices, indptr), shape=(3, 3))
+
+        gko_csr = bridge.csr(original)
+        recovered = bridge.to_cupy_csr(gko_csr)
+        cupy.testing.assert_array_almost_equal(
+            original.toarray(), recovered.toarray()
+        )
+
+    @pytest.mark.skipif(not cupy_sparse_avail, reason="no cupy sparse")
+    def test_to_cupy_coo_roundtrip(self):
+        import pyGinkgo.pyGinkgoBindings as pGB
+
+        bridge = CuPyBridge(pGB.CudaExecutor())
+        data = cupy.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=cupy.float64)
+        row = cupy.array([0, 0, 1, 2, 2], dtype=cupy.int32)
+        col = cupy.array([0, 2, 1, 0, 2], dtype=cupy.int32)
+        original = cupy_sparse.coo_matrix((data, (row, col)), shape=(3, 3))
+
+        gko_coo = bridge.coo(original)
+        recovered = bridge.to_cupy_coo(gko_coo)
+        cupy.testing.assert_array_almost_equal(
+            original.toarray(), recovered.toarray()
+        )
 
 
 # ---- Edge cases / error handling ---------------------------------------

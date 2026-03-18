@@ -13,4 +13,5 @@ from . import gko_types
 from . import solver
 from . import preconditioner
 from . import cupy_interop
+from .cupy_interop import CuPyBridge
 
