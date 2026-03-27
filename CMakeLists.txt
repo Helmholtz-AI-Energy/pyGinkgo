@@ -182,8 +182,8 @@ endif()
 set(CMAKE_INSTALL_RPATH ${Python_SITELIB}/${PROJECT_NAME})
 
 message(STATUS "Install path: ${Python_SITELIB}")
-install(DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
-        DESTINATION ${Python_SITELIB})
+install(DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/
+        DESTINATION ${PY_BUILD_CMAKE_MODULE_NAME})
 if(NOT Ginkgo_FOUND)
   # Only install Ginkgo shared libraries when built from source (FetchContent).
   # When using a pre-installed Ginkgo (e.g. conda), its libraries are already available.
@@ -197,5 +197,5 @@ if(NOT Ginkgo_FOUND)
     ginkgo_dpcpp
     ginkgo_reference
     DESTINATION
-    ${Python_SITELIB}/${PROJECT_NAME})
+    ${PY_BUILD_CMAKE_MODULE_NAME})
 endif()
