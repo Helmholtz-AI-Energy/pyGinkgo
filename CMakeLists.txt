@@ -42,10 +42,10 @@ if(NOT nlohmann_json_FOUND)
 endif()
 
 # Find  Ginkgo find_package(Ginkgo 1.7.0 QUIET)
-find_package(ginkgo QUIET)
+find_package(Ginkgo QUIET)
 
 # Fetch Ginkgo if not found
-if(NOT ginkgo_FOUND)
+if(NOT Ginkgo_FOUND)
   # If not found, fetch Ginkgo
   include(FetchContent)
   if(NOT DEFINED GINKGO_BUILD_TESTS)
@@ -184,14 +184,18 @@ set(CMAKE_INSTALL_RPATH ${Python_SITELIB}/${PROJECT_NAME})
 message(STATUS "Install path: ${Python_SITELIB}")
 install(DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
         DESTINATION ${Python_SITELIB})
-install(
-  IMPORTED_RUNTIME_ARTIFACTS
-  ginkgo
-  ginkgo_device
-  ginkgo_hip
-  ginkgo_cuda
-  ginkgo_omp
-  ginkgo_dpcpp
-  ginkgo_reference
-  DESTINATION
-  ${Python_SITELIB}/${PROJECT_NAME})
+if(NOT Ginkgo_FOUND)
+  # Only install Ginkgo shared libraries when built from source (FetchContent).
+  # When using a pre-installed Ginkgo (e.g. conda), its libraries are already available.
+  install(
+    IMPORTED_RUNTIME_ARTIFACTS
+    ginkgo
+    ginkgo_device
+    ginkgo_hip
+    ginkgo_cuda
+    ginkgo_omp
+    ginkgo_dpcpp
+    ginkgo_reference
+    DESTINATION
+    ${Python_SITELIB}/${PROJECT_NAME})
+endif()
