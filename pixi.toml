@@ -1,0 +1,26 @@
+[workspace]
+channels = ["https://prefix.dev/lucas-forge", "https://prefix.dev/conda-forge"]
+preview = ["pixi-build"]
+platforms = ["osx-arm64"]
+
+[workspace.build-variants]
+python = ["3.12.*"]
+
+[package.build.backend]
+name = "pixi-build-python"
+version = "*"
+
+[package.build.config]
+ignore-pypi-mapping = false
+compilers = ["cxx"]
+
+[package.host-dependencies]
+py-build-cmake = "*"
+pybind11 = "*"
+ginkgo = "*"
+cmake = "*"
+python = "*"
+
+[package.run-dependencies]
+python = "*"
+ginkgo = "*"

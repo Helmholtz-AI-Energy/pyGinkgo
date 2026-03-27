@@ -1,3 +1,6 @@
+.py-build-cmake_cache
+*.conda
+
 # Prerequisites
 *.d
 
@@ -203,3 +206,6 @@ cython_debug/
 src/pyGinkgo/pyGinkgoBindings/
 
 .venv_p
+# pixi environments
+.pixi/*
+!.pixi/config.toml

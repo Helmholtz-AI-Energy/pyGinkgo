@@ -186,12 +186,12 @@ install(DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
         DESTINATION ${Python_SITELIB})
 install(
   IMPORTED_RUNTIME_ARTIFACTS
-  ginkgo
-  ginkgo_device
-  ginkgo_hip
-  ginkgo_cuda
-  ginkgo_omp
-  ginkgo_dpcpp
-  ginkgo_reference
+  Ginkgo::ginkgo
+  Ginkgo::ginkgo_device
+  Ginkgo::ginkgo_hip
+  Ginkgo::ginkgo_cuda
+  Ginkgo::ginkgo_omp
+  Ginkgo::ginkgo_dpcpp
+  Ginkgo::ginkgo_reference
   DESTINATION
   ${Python_SITELIB}/${PROJECT_NAME})
