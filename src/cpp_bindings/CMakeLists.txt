@@ -17,5 +17,19 @@ set(PYGINKGO_CPP_SOURCES
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/solver/direct.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/solver/gmres.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/solver/triangular.cpp
-    ${PROJECT_SOURCE_DIR}/src/cpp_bindings/factorization/factorization.cpp
-    PARENT_SCOPE)
+    ${PROJECT_SOURCE_DIR}/src/cpp_bindings/factorization/factorization.cpp)
+
+if(pyGinkgo_BUILD_MPI)
+  list(
+    APPEND
+    PYGINKGO_CPP_SOURCES
+    ${PROJECT_SOURCE_DIR}/src/cpp_bindings/mpi/communicator.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp_bindings/mpi/abi_check.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp_bindings/distributed/partition.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp_bindings/distributed/vector.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp_bindings/distributed/matrix.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp_bindings/distributed/linop.cpp
+  )
+endif()
+
+set(PYGINKGO_CPP_SOURCES ${PYGINKGO_CPP_SOURCES} PARENT_SCOPE)

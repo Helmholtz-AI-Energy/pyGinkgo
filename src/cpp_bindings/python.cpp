@@ -4,6 +4,10 @@
 
 #include "python.hpp"
 
+#ifdef PYGINKGO_BUILD_MPI
+#include "mpi/communicator.hpp"
+#endif
+
 namespace py = pybind11;
 
 void init_array_all_types(py::module_ &);
@@ -20,6 +24,13 @@ void add_allocator_classes(py::module_ &);
 void add_stream_classes(py::module_ &);
 void add_dpcpp_queue_property_enum(py::module_ &);
 void add_executor_classes(py::module_ &);
+
+#ifdef PYGINKGO_BUILD_MPI
+void init_distributed_partition_all_types(py::module_ &);
+void init_distributed_vector_all_types(py::module_ &);
+void init_distributed_matrix_all_types(py::module_ &);
+void init_distributed_pylinop(py::module_ &);
+#endif
 
 PYBIND11_MODULE(pyGinkgoBindings, m)
 {
@@ -86,4 +97,18 @@ PYBIND11_MODULE(pyGinkgoBindings, m)
     py::module_ module_preconditioner = m.def_submodule(
         "preconditioner", "Submodule for Ginkgos preconditioner type bindings");
     init_ilu_all_types(module_preconditioner);
+
+#ifdef PYGINKGO_BUILD_MPI
+    py::module_ module_mpi =
+        m.def_submodule("mpi", "Submodule for Ginkgos MPI bindings");
+    pyginkgo_mpi::init_communicator(module_mpi);
+    pyginkgo_mpi::init_abi_check(module_mpi);
+
+    py::module_ module_distributed = m.def_submodule(
+        "distributed", "Submodule for Ginkgos distributed-memory bindings");
+    init_distributed_partition_all_types(module_distributed);
+    init_distributed_vector_all_types(module_distributed);
+    init_distributed_matrix_all_types(module_distributed);
+    init_distributed_pylinop(module_distributed);
+#endif
 }
