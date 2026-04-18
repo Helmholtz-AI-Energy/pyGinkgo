@@ -16,7 +16,23 @@ set(PYTHON_EXECUTABLE ${Python_EXECUTABLE})
 # copy all generated files to pyGinkgo that makes testing and installing easier
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${PROJECT_NAME})
 
-# Find OpenMPI find_package(MPI REQUIRED)
+# Optional MPI / distributed support.
+#
+# When enabled:
+#   * find_package(MPI REQUIRED) is invoked
+#   * mpi4py headers are located via the active Python interpreter
+#   * GINKGO_BUILD_MPI=ON is propagated to the bundled Ginkgo (FetchContent),
+#     and a pre-installed Ginkgo without MPI support is rejected
+#   * the PYGINKGO_BUILD_MPI compile definition is set, gating all
+#     #ifdef-protected distributed source files
+#   * the MPI implementation flavor and library version are baked into a
+#     generated header so the import-time check can verify mpi4py matches
+option(pyGinkgo_BUILD_MPI
+       "Build pyGinkgo with MPI/distributed bindings (requires mpi4py)" OFF)
+
+if(pyGinkgo_BUILD_MPI)
+  find_package(MPI REQUIRED COMPONENTS C CXX)
+endif()
 
 # Find pybind11
 find_package(pybind11 QUIET)
@@ -42,10 +58,20 @@ if(NOT nlohmann_json_FOUND)
 endif()
 
 # Find  Ginkgo find_package(Ginkgo 1.7.0 QUIET)
-find_package(ginkgo QUIET)
+find_package(Ginkgo QUIET)
+
+if(pyGinkgo_BUILD_MPI AND Ginkgo_FOUND AND NOT GINKGO_BUILD_MPI)
+  message(
+    FATAL_ERROR
+      "pyGinkgo_BUILD_MPI=ON requires a Ginkgo built with GINKGO_BUILD_MPI=ON. "
+      "The pre-installed Ginkgo at ${Ginkgo_DIR} was built without MPI. "
+      "Either install an MPI-enabled Ginkgo (e.g. the conda 'mpich' or "
+      "'openmpi' variants) or unset Ginkgo_DIR to fetch and build Ginkgo from "
+      "source.")
+endif()
 
 # Fetch Ginkgo if not found
-if(NOT ginkgo_FOUND)
+if(NOT Ginkgo_FOUND)
   # If not found, fetch Ginkgo
   include(FetchContent)
   if(NOT DEFINED GINKGO_BUILD_TESTS)
@@ -56,6 +82,9 @@ if(NOT ginkgo_FOUND)
   endif()
   if(NOT DEFINED GINKGO_BUILD_EXAMPLES)
     set(GINKGO_BUILD_EXAMPLES OFF)
+  endif()
+  if(pyGinkgo_BUILD_MPI)
+    set(GINKGO_BUILD_MPI ON CACHE BOOL "Build Ginkgo with MPI" FORCE)
   endif()
   FetchContent_Declare(
     ginkgo
@@ -76,6 +105,37 @@ if(GINKGO_BUILD_SYCL)
   add_compile_definitions(GINKGO_BUILD_SYCL)
 endif()
 
+if(pyGinkgo_BUILD_MPI)
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+  find_package(Mpi4py REQUIRED)
+
+  # Sanity-check that mpi4py and our MPI agree on a library directory when
+  # mpi4py reports one. Mismatches between mpich/openmpi/nompi flavors here
+  # are a common source of silent ABI breakage downstream.
+  if(Mpi4py_MPI_LIBRARY_DIR)
+    set(_mpi_lib_dirs "")
+    foreach(_lib IN LISTS MPI_C_LIBRARIES)
+      get_filename_component(_dir "${_lib}" DIRECTORY)
+      list(APPEND _mpi_lib_dirs "${_dir}")
+    endforeach()
+    list(REMOVE_DUPLICATES _mpi_lib_dirs)
+    list(FIND _mpi_lib_dirs "${Mpi4py_MPI_LIBRARY_DIR}" _idx)
+    if(_idx EQUAL -1)
+      message(
+        WARNING
+          "mpi4py was built against MPI in '${Mpi4py_MPI_LIBRARY_DIR}' but "
+          "find_package(MPI) selected libraries in '${_mpi_lib_dirs}'. "
+          "This may cause runtime ABI mismatches between mpich/openmpi.")
+    endif()
+  endif()
+
+  include(DetectMpiAbi)
+  pyginkgo_detect_mpi_abi()
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/pyGinkgo_mpi_abi.hpp.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/pyGinkgo_mpi_abi.hpp" @ONLY)
+endif()
+
 add_subdirectory(src/cpp_bindings)
 
 pybind11_add_module(pyGinkgoBindings ${PYGINKGO_CPP_SOURCES})
@@ -85,6 +145,14 @@ target_include_directories(pyGinkgoBindings
 target_link_libraries(pyGinkgoBindings PRIVATE Ginkgo::ginkgo)
 target_link_libraries(pyGinkgoBindings PUBLIC nlohmann_json::nlohmann_json)
 set_property(TARGET pyGinkgoBindings PROPERTY CXX_STANDARD 14)
+
+if(pyGinkgo_BUILD_MPI)
+  target_compile_definitions(pyGinkgoBindings PRIVATE PYGINKGO_BUILD_MPI)
+  target_link_libraries(pyGinkgoBindings PRIVATE MPI::MPI_C MPI::MPI_CXX)
+  target_include_directories(
+    pyGinkgoBindings PRIVATE ${Mpi4py_INCLUDE_DIR}
+                             ${CMAKE_CURRENT_BINARY_DIR}/generated)
+endif()
 
 # Disable false positive warnings from GCC (>= 12.4 and <
 # 13)(https://gcc.gnu.org/bugzilla/show_bug.cgi?id=115824 and
@@ -182,16 +250,20 @@ endif()
 set(CMAKE_INSTALL_RPATH ${Python_SITELIB}/${PROJECT_NAME})
 
 message(STATUS "Install path: ${Python_SITELIB}")
-install(DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
-        DESTINATION ${Python_SITELIB})
-install(
-  IMPORTED_RUNTIME_ARTIFACTS
-  ginkgo
-  ginkgo_device
-  ginkgo_hip
-  ginkgo_cuda
-  ginkgo_omp
-  ginkgo_dpcpp
-  ginkgo_reference
-  DESTINATION
-  ${Python_SITELIB}/${PROJECT_NAME})
+install(DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/
+        DESTINATION ${PY_BUILD_CMAKE_MODULE_NAME})
+if(NOT Ginkgo_FOUND)
+  # Only install Ginkgo shared libraries when built from source (FetchContent).
+  # When using a pre-installed Ginkgo (e.g. conda), its libraries are already available.
+  install(
+    IMPORTED_RUNTIME_ARTIFACTS
+    ginkgo
+    ginkgo_device
+    ginkgo_hip
+    ginkgo_cuda
+    ginkgo_omp
+    ginkgo_dpcpp
+    ginkgo_reference
+    DESTINATION
+    ${PY_BUILD_CMAKE_MODULE_NAME})
+endif()

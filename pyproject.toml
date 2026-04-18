@@ -51,6 +51,9 @@ Issues= "https://github.com/Helmholtz-AI-Energy/pyGinkgo/issues"
 test = [
     "pytest",
 ]
+mpi = [
+    "mpi4py>=3.1",
+]
 
 [tool.cibuildwheel]
 build-verbosity = 1

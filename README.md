@@ -242,3 +242,108 @@ x_cupy = cupy.asarray(x_gko)
 ## Benchmarking
 
 The benchmarking results are presented in our [pyGinkgo publication on arXiv](https://arxiv.org/abs/2510.08230).
+
+## Distributed (MPI) bindings
+
+pyGinkgo can optionally expose Ginkgo's distributed-memory types
+(`gko::experimental::distributed::{Partition, Vector, Matrix}`,
+`Schwarz` preconditioner) plus a `PyLinOp` matrix-free trampoline. This
+is gated behind the `pyGinkgo_BUILD_MPI` CMake option so the default
+single-process wheel stays MPI-free.
+
+### Building with MPI
+
+```bash
+cmake -B build -S . -DpyGinkgo_BUILD_MPI=ON
+cmake --build build -j
+pip install ".[mpi]"   # adds the mpi4py runtime dependency
+```
+
+The build will:
+
+1. Refuse to use a pre-installed Ginkgo that was compiled without MPI
+   (the include path must contain `GINKGO_BUILD_MPI=1`).
+2. Locate `mpi4py` via Python and pull in its C headers.
+3. Bake the `MPI_Get_library_version()` string of the build-time MPI
+   into the binary so the Python facade can detect mpich-vs-openmpi
+   mismatches at import time.
+
+### Quick start
+
+```python
+from mpi4py import MPI
+import cupy
+from pyGinkgo import device
+from pyGinkgo.distributed import (
+    Partition, DistributedVector, DistributedMatrix,
+)
+import pyGinkgo.distributed.communicator as gkc
+
+comm = MPI.COMM_WORLD
+exec_ = device("cuda", gkc.map_rank_to_device_id(comm, cupy.cuda.runtime.getDeviceCount()))
+
+# 1D row partition over global_size rows, evenly split across ranks
+part = Partition.uniform(exec_, comm.size, global_size=N)
+
+# Distributed RHS from a local cupy slice
+b = DistributedVector.from_local_array(
+    exec_, comm, global_size=(N, 1), local_array=local_b_cupy)
+```
+
+The C++ `solver.{cg,gmres,bicgstab}_*` factories accept any LinOp, so a
+distributed Matrix or a `PyLinOp` slots into the existing solver path
+unchanged. Each `apply()` returns a `(Convergence, x)` pair so callers
+can read final residual and iteration count:
+
+```python
+cg = pgb.solver.cg_double(exec_, A.raw, max_iters=200,
+                          reduction_factor=1e-10, relative_stop_mode=True)
+log, _ = cg.apply(b.raw, x.raw)
+print(log.get_num_iterations(), log.get_residual_norm())
+```
+
+### Matrix-free distributed operators (`PyLinOp`)
+
+When a `PyLinOp` subclass is used inside a distributed solver, the
+`apply_impl(b, x)` callback receives the *distributed* vectors directly;
+this rank only owns the local block. **The callback is responsible for
+any halo exchange required by the matrix-free matvec** — Ginkgo does not
+perform implicit halo communication for user-defined operators. A
+typical CuPy callback should call `cupy.cuda.Stream.null.synchronize()`
+before returning so Ginkgo (which dispatches on its own executor stream)
+sees the writes.
+
+### Diagnostics: gather a distributed vector to host
+
+```python
+host = v.raw.gather_on_root(0)  # numpy array on rank 0, None elsewhere
+```
+
+### Zero-copy CuPy ↔ distributed.Vector
+
+`DistributedVector.from_local_array(...)` always copies. For a
+zero-copy view that aliases a CuPy buffer, use the C++ static method
+directly and keep a reference to the source array alive:
+
+```python
+v = pgb.distributed.Vector_double.from_local_array_view(
+        exec_, comm, (N, 1), local_cupy_array)
+```
+
+### MPI ABI safety
+
+Mixing an MPICH-built pyGinkgo with an OpenMPI-built mpi4py is a
+common source of mysterious crashes. `pyGinkgo.distributed` performs
+three independent checks:
+
+1. CMake-time: warns if the mpi4py library directory disagrees with the
+   detected MPI install.
+2. Configure-time: a `try_run` probe records the build MPI's
+   `MPI_Get_library_version()` string into the compiled extension.
+3. Import-time: the first call that takes a communicator compares the
+   baked string with `MPI.Get_library_version()` and asks the C++ side
+   to round-trip a small MPI op on the user's `comm`.
+
+A mismatch raises `ImportError` with a hint to install a matching
+conda variant (`pyginkgo-mpi-{mpich,openmpi}`).
+
