@@ -11,10 +11,35 @@
 template <typename ValueType>
 void check_buffer_dtype(const py::buffer_info &info)
 {
-    if (info.format != py::format_descriptor<ValueType>::format())
-        throw std::runtime_error("Incompatible dtypes: " + info.format +
-                                 " vs " +
-                                 py::format_descriptor<ValueType>::format());
+    auto expected = py::format_descriptor<ValueType>::format();
+    if (info.format == expected) return;
+
+    // On platforms where two distinct C types have the same size (e.g.
+    // 'l' vs 'q' for 64-bit integers on x86_64 Linux, or 'l' vs 'i' for
+    // 32-bit integers on Windows), pybind11's format string and numpy's
+    // format string can disagree even though the layout is identical.
+    // Treat them as compatible if the itemsize and integer/float-ness
+    // match.
+    if (static_cast<size_t>(info.itemsize) == sizeof(ValueType) &&
+        info.format.size() == 1 && expected.size() == 1) {
+        const char a = info.format[0];
+        const char b = expected[0];
+        auto is_signed_int = [](char c) {
+            return c == 'b' || c == 'h' || c == 'i' || c == 'l' || c == 'q' ||
+                   c == 'n';
+        };
+        auto is_unsigned_int = [](char c) {
+            return c == 'B' || c == 'H' || c == 'I' || c == 'L' || c == 'Q' ||
+                   c == 'N';
+        };
+        if ((is_signed_int(a) && is_signed_int(b)) ||
+            (is_unsigned_int(a) && is_unsigned_int(b))) {
+            return;
+        }
+    }
+
+    throw std::runtime_error("Incompatible dtypes: " + info.format +
+                             " vs " + expected);
 }
 
 /**
