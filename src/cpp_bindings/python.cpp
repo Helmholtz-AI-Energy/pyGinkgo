@@ -15,11 +15,14 @@ void init_dense_all_types(py::module_ &);
 void init_sparse_all_types(py::module_ &);
 void init_logger_all_types(py::module_ &);
 void init_gmres_all_types(py::module_ &);
+void init_cg_all_types(py::module_ &);
+void init_bicgstab_all_types(py::module_ &);
 void init_direct_all_types(py::module_ &);
 void init_trs_all_types(py::module_ &);
 void init_factorization(py::module_ &);
 void init_config_solver_all_types(py::module_ &);
 void init_ilu_all_types(py::module_ &);
+void init_jacobi_all_types(py::module_ &);
 void add_allocator_classes(py::module_ &);
 void add_stream_classes(py::module_ &);
 void add_dpcpp_queue_property_enum(py::module_ &);
@@ -86,6 +89,8 @@ PYBIND11_MODULE(pyGinkgoBindings, m)
     py::module_ module_solver =
         m.def_submodule("solver", "Submodule for Ginkgos solver type bindings");
     init_gmres_all_types(module_solver);
+    init_cg_all_types(module_solver);
+    init_bicgstab_all_types(module_solver);
     init_direct_all_types(module_solver);
     init_config_solver_all_types(module_solver);
     init_trs_all_types(module_solver);
@@ -97,6 +102,7 @@ PYBIND11_MODULE(pyGinkgoBindings, m)
     py::module_ module_preconditioner = m.def_submodule(
         "preconditioner", "Submodule for Ginkgos preconditioner type bindings");
     init_ilu_all_types(module_preconditioner);
+    init_jacobi_all_types(module_preconditioner);
 
 #ifdef PYGINKGO_BUILD_MPI
     py::module_ module_mpi =

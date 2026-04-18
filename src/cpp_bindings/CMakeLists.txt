@@ -13,9 +13,12 @@ set(PYGINKGO_CPP_SOURCES
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/logger.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/executor.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/preconditioner/ilu.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp_bindings/preconditioner/jacobi.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/solver/config_solver.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/solver/direct.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/solver/gmres.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp_bindings/solver/cg.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp_bindings/solver/bicgstab.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/solver/triangular.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/factorization/factorization.cpp)
 
