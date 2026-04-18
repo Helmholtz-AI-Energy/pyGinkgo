@@ -41,7 +41,7 @@ if(NOT nlohmann_json_FOUND)
   FetchContent_MakeAvailable(nlohmann_json)
 endif()
 
-# Find  Ginkgo find_package(Ginkgo 1.7.0 QUIET)
+# Find Ginkgo (quietly; no minimum version specified)
 find_package(Ginkgo QUIET)
 
 # Fetch Ginkgo if not found
