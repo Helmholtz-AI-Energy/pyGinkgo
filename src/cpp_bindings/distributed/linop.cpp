@@ -83,7 +83,17 @@ void init_distributed_pylinop(py::module_& module)
         "Subclass-this LinOp for matrix-free operators in Python. Override "
         "`apply_impl(b, x)` to compute `x = A @ b` (and optionally "
         "`apply_impl_scaled(alpha, b, beta, x)` for `x = alpha*A*b + "
-        "beta*x`).")
+        "beta*x`).\n\n"
+        "Distributed usage: when the enclosing solver is invoked on a "
+        "`distributed.Vector`, the callback receives the *distributed* "
+        "vectors directly (cast as `gko::LinOp*`); only the local block "
+        "is owned by this rank. The callback is responsible for any "
+        "halo exchange required by the matrix-free matvec -- Ginkgo does "
+        "not perform implicit halo communication for user-defined "
+        "operators. A typical CuPy callback should call "
+        "`cupy.cuda.Stream.null.synchronize()` before returning to "
+        "guarantee Ginkgo sees the writes (Ginkgo dispatches on its own "
+        "executor stream which may differ from CuPy's default).")
         .def(py::init([](std::shared_ptr<const gko::Executor> exec,
                          py::tuple size) {
                  return std::shared_ptr<PyLinOpTrampoline>(

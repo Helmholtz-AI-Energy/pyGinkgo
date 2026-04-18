@@ -292,7 +292,43 @@ b = DistributedVector.from_local_array(
 
 The C++ `solver.{cg,gmres,bicgstab}_*` factories accept any LinOp, so a
 distributed Matrix or a `PyLinOp` slots into the existing solver path
-unchanged.
+unchanged. Each `apply()` returns a `(Convergence, x)` pair so callers
+can read final residual and iteration count:
+
+```python
+cg = pgb.solver.cg_double(exec_, A.raw, max_iters=200,
+                          reduction_factor=1e-10, relative_stop_mode=True)
+log, _ = cg.apply(b.raw, x.raw)
+print(log.get_num_iterations(), log.get_residual_norm())
+```
+
+### Matrix-free distributed operators (`PyLinOp`)
+
+When a `PyLinOp` subclass is used inside a distributed solver, the
+`apply_impl(b, x)` callback receives the *distributed* vectors directly;
+this rank only owns the local block. **The callback is responsible for
+any halo exchange required by the matrix-free matvec** — Ginkgo does not
+perform implicit halo communication for user-defined operators. A
+typical CuPy callback should call `cupy.cuda.Stream.null.synchronize()`
+before returning so Ginkgo (which dispatches on its own executor stream)
+sees the writes.
+
+### Diagnostics: gather a distributed vector to host
+
+```python
+host = v.raw.gather_on_root(0)  # numpy array on rank 0, None elsewhere
+```
+
+### Zero-copy CuPy ↔ distributed.Vector
+
+`DistributedVector.from_local_array(...)` always copies. For a
+zero-copy view that aliases a CuPy buffer, use the C++ static method
+directly and keep a reference to the source array alive:
+
+```python
+v = pgb.distributed.Vector_double.from_local_array_view(
+        exec_, comm, (N, 1), local_cupy_array)
+```
 
 ### MPI ABI safety
 
