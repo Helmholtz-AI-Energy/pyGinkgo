@@ -76,10 +76,20 @@ void init_distributed_matrix(py::module_& module, const std::string& vt,
             py::arg("recv_connections"), py::arg("local_linop"),
             py::arg("non_local_linop"),
             "Create a distributed matrix from local-diagonal and non-local "
-            "(off-diagonal) LinOps. `recv_connections` is a 1D array of "
-            "global column indices that the non-local block accesses; the "
-            "non-local LinOp's column indices must be consistent with the "
-            "induced index_map ordering.")
+            "(off-diagonal) LinOps.\n\n"
+            "Index conventions:\n"
+            "  * `local_linop` columns are LOCAL row indices on this rank.\n"
+            "  * `recv_connections` is a 1D array of GLOBAL column indices "
+            "that the non-local block accesses; duplicates are allowed but "
+            "discouraged.\n"
+            "  * `non_local_linop` columns are LOCAL indices into "
+            "`recv_connections` (i.e. positions, not global ids). The "
+            "induced index_map orders columns by source rank, then by "
+            "ascending global id within each source.\n\n"
+            "If your off-diagonal block is naturally indexed by global "
+            "column ids, build it as COO using global ids and convert to "
+            "this layout with the index_map's mapping helpers, or supply "
+            "the columns already remapped.")
         .def(
             "get_local_matrix",
             [](const M& self) { return self.get_local_matrix(); },
