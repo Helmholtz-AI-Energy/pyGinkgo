@@ -13,6 +13,7 @@ void init_logger_all_types(py::module_ &);
 void init_gmres_all_types(py::module_ &);
 void init_direct_all_types(py::module_ &);
 void init_trs_all_types(py::module_ &);
+void init_cg_all_types(py::module_ &);
 void init_factorization(py::module_ &);
 void init_config_solver_all_types(py::module_ &);
 void init_ilu_all_types(py::module_ &);
@@ -78,6 +79,7 @@ PYBIND11_MODULE(pyGinkgoBindings, m)
     init_direct_all_types(module_solver);
     init_config_solver_all_types(module_solver);
     init_trs_all_types(module_solver);
+    init_cg_all_types(module_solver);
 
     py::module_ module_factorization = m.def_submodule(
         "factorization", "Submodule for Ginkgos factorization type bindings");
