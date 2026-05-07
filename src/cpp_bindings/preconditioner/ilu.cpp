@@ -6,8 +6,7 @@
 #include "../utils.hpp"
 
 template <typename ValueType, typename IndexType>
-using Ilu =
-    gko::preconditioner::Ilu<ValueType, false, IndexType>;
+using Ilu = gko::preconditioner::Ilu<ValueType, false, IndexType>;
 
 template <typename ValueType, typename IndexType>
 void init_ilu(py::module_ &module_preconditioner, const std::string value_type,
