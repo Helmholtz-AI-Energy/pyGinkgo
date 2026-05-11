@@ -9,7 +9,7 @@ import pyGinkgo as pg
 import pyGinkgo.pyGinkgoBindings as pGB
 
 
-@pytest.mark.parametrize("solver_name", ["gmres"])
+@pytest.mark.parametrize("solver_name", ["gmres", "cg"])
 @pytest.mark.parametrize(
     "data_type",
     [
@@ -24,6 +24,11 @@ class TestIterativeSolverBinding:
     solver_args = {
         "gmres": {
             "krylov_dim": 10,
+            "max_iters": 1000,
+            "reduction_factor": 1e-06,
+            "relative_stop_mode": False,
+        },
+        "cg": {
             "max_iters": 1000,
             "reduction_factor": 1e-06,
             "relative_stop_mode": False,
@@ -61,6 +66,11 @@ class TestIterativeSolverBinding:
     def test_ilu_preconditioned_solver(
         self, solver_name, data_type: pg.gko_types.ValueType
     ):
+        if solver_name == "cg":
+            pytest.skip(
+                "ILU preconditioning is not suitable for CG because ILU is not guaranteed to be SPD"
+            )
+
         fn = os.path.dirname(os.path.realpath(__file__)) + "/fv1.mtx"
         reader_cls = getattr(pGB.matrix, f"read_Coo_{data_type}_int32")
         mtx = reader_cls(fn, self.ref)
