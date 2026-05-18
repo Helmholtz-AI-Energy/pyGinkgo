@@ -30,7 +30,7 @@ void init_cg(py::module_ &module_solver, const std::string value_type)
                  auto stop_mode = (relative_stop_mode)
                                       ? gko::stop::mode::rhs_norm
                                       : gko::stop::mode::absolute;
-                 auto fact = gko::share(
+                 auto factory = gko::share(
                      gko::solver::Cg<ValueType>::build()
                          .with_criteria(
                              gko::stop::Iteration::build().with_max_iters(
