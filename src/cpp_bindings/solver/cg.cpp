@@ -39,7 +39,7 @@ void init_cg(py::module_ &module_solver, const std::string value_type)
                                  .with_baseline(stop_mode)
                                  .with_reduction_factor(reduction_factor))
                          .on(exec));
-                 return gko::share(fact->generate(system_matrix));
+                 return gko::share(factory->generate(system_matrix));
              }),
              py::arg("exec"), py::arg("system_matrix"), py::arg("max_iters"),
              py::arg("reduction_factor"), py::arg("relative_stop_mode"))
@@ -51,7 +51,7 @@ void init_cg(py::module_ &module_solver, const std::string value_type)
                  auto stop_mode = (relative_stop_mode)
                                       ? gko::stop::mode::rhs_norm
                                       : gko::stop::mode::absolute;
-                 auto fact = gko::share(
+                 auto factory = gko::share(
                      gko::solver::Cg<ValueType>::build()
                          .with_criteria(
                              gko::stop::Iteration::build().with_max_iters(
@@ -61,7 +61,7 @@ void init_cg(py::module_ &module_solver, const std::string value_type)
                                  .with_reduction_factor(reduction_factor))
                          .with_generated_preconditioner(preconditioner)
                          .on(exec));
-                 return gko::share(fact->generate(system_matrix));
+                 return gko::share(factory->generate(system_matrix));
              }),
              py::arg("exec"), py::arg("system_matrix"),
              py::arg("preconditioner"), py::arg("max_iters"),
