@@ -1,4 +1,5 @@
 # Version 0.1.0 (unreleased)
+- Add tests for sparse matrix transpose function [#95](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/95)
 - Fix ILU preconditioner binding for the updated Ginkgo API [#107](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/107)
 - Add CuPy interoperability for zero-copy GPU data exchange via `__cuda_array_interface__`
 - Make it pip installable [#86](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/86)
