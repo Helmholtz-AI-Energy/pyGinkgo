@@ -44,7 +44,8 @@ def as_tensor(
     fill: Optional[float] = None,
 ):
     """create a ginkgo array from a given object"""
-    if not dtype in gko_types.ValueType.values():
+    dtype = str(dtype)
+    if dtype not in gko_types.ValueType.values():
         raise ValueError(
             f"Not a valid dtype: {dtype}. " +
             "Possible choices are: " +
@@ -58,15 +59,17 @@ def as_tensor(
             obj = obj.__array__()
 
     array_cls = getattr(pGB.matrix, "dense_" + dtype)
-    if obj:
+    if obj is not None:
         return array_cls(executor, obj)
-    else:
-        res = array_cls(executor, dim)
+
+    if dim is None:
+        raise ValueError("Either obj or dim must be provided.")
+    
+    res = array_cls(executor, dim)
+    if fill is not None:
+        res.fill(fill)
         
-        if fill is not None:
-            res.fill(fill)
-        
-        return res
+    return res
 
 
 def read(
@@ -147,7 +150,7 @@ def eigen_solve(A,solver_args=None):
     hY = dense_cls(exec_obj, Q.__array__())
     return Lambda, hY
 
-def generate_solver(A, solver_args: dict = dict()):
+def generate_solver(A, solver_args=None):
     """Generate a solver based on the system matrix A
 
     Parameters: A - The system matrix
@@ -156,7 +159,7 @@ def generate_solver(A, solver_args: dict = dict()):
     Returns: the solver
     """
 
-    if not solver_args:
+    if solver_args is None or solver_args == {}:
         solver_args = {
             "type": "solver::Gmres",
             "preconditioner": {
@@ -179,7 +182,7 @@ def generate_solver(A, solver_args: dict = dict()):
     return solver
 
 def config_solve(A,b,x,solver_args=None):
-    if not solver_args:
+    if solver_args is None or solver_args == {}:
         solver_args = {
             "type": "solver::Gmres",
             "preconditioner": {
@@ -214,7 +217,7 @@ def triangular_solve(A,b,x,solver_args):
     trs.apply(b, x)
     return None, x
 
-def solve(A, b, initial_guess=None, solver_args: dict = dict(), kind="config"):
+def solve(A, b, initial_guess=None, solver_args: Optional[dict] = None, kind="config"):
     """Solve a given linear system, where A is the system matrix and b the RHS
 
     Parameters: A - The system matrix
@@ -229,7 +232,7 @@ def solve(A, b, initial_guess=None, solver_args: dict = dict(), kind="config"):
 
     ctor = globals()[kind+"_solve"]
 
-    if not initial_guess:
+    if initial_guess is None:
         dtype = type(A).__name__.split('_')[1]
         dense_cls = getattr(pGB.matrix, f"dense_{dtype}")
         dim = (A.shape[1], b.shape[1])
