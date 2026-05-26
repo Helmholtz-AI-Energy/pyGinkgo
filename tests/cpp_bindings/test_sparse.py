@@ -209,3 +209,55 @@ class TestSparseMatrix:
         sparse = matrix_cls(self.ref, (5, 5), coeffs, cols, rows)
         dense = sparse.convert_to_dense()
         assert dense == dense
+
+    def test_can_transpose_sparse_matrix(
+        self,
+        matrix_format,
+        value_type: pg.gko_types.ValueType,
+        index_type: pg.gko_types.IndexType,
+    ):
+        matrix_cls = getattr(pGB.matrix, f"{matrix_format}_{value_type}_{index_type}")
+        coeffs = np.array(self.values, dtype=value_type.numpy_type)
+        rows = np.array(self.get_rows(matrix_format), dtype=index_type.numpy_type)
+        cols = np.array(self.cols, dtype=index_type.numpy_type)
+
+        sparse = matrix_cls(self.ref, (5, 5), coeffs, cols, rows)
+
+        sparse_T = sparse.T()
+
+        assert sparse_T.shape == (5, 5)
+
+        assert sparse_T.get_num_stored_elements() == sparse.get_num_stored_elements()
+
+        dense = sparse.convert_to_dense()
+        dense_T = sparse_T.convert_to_dense()
+
+        for i in range(5):
+            for j in range(5):
+                assert dense_T.at(i, j) == dense.at(j, i)
+
+    def test_double_transpose_returns_original(
+        self,
+        matrix_format,
+        value_type: pg.gko_types.ValueType,
+        index_type: pg.gko_types.IndexType,
+    ):
+        matrix_cls = getattr(pGB.matrix, f"{matrix_format}_{value_type}_{index_type}")
+
+        coeffs = np.array(self.values, dtype=value_type.numpy_type)
+        rows = np.array(self.get_rows(matrix_format), dtype=index_type.numpy_type)
+        cols = np.array(self.cols, dtype=index_type.numpy_type)
+
+        sparse = matrix_cls(self.ref, (5, 5), coeffs, cols, rows)
+
+        sparse_TT = sparse.T().T()
+
+        assert sparse_TT.shape == sparse.shape
+        assert sparse_TT.get_num_stored_elements() == sparse.get_num_stored_elements()
+
+        dense_orig = sparse.convert_to_dense()
+        dense_TT = sparse_TT.convert_to_dense()
+
+        for i in range(5):
+            for j in range(5):
+                assert dense_TT.at(i, j) == dense_orig.at(i, j)
