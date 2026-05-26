@@ -1,4 +1,5 @@
 # Version 0.1.0 (unreleased)
+- Fix issue#94 Python helper API and tests [#111](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/111)
 - Add CG solver binding and tests [#109](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/109)
 - Internal test of PR#95: Add tests for sparse matrix transpose function [#110](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/110)
 - Fix ILU preconditioner binding for the updated Ginkgo API [#107](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/107)
