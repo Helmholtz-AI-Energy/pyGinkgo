@@ -150,12 +150,13 @@ def eigen_solve(A,solver_args=None):
     hY = dense_cls(exec_obj, Q.__array__())
     return Lambda, hY
 
-def generate_solver(A, solver_args=None):
+def generate_solver(A, solver_args: Optional[dict] = None):
     """Generate a solver based on the system matrix A
 
     Parameters: A - The system matrix
-                solver_args - A dictionary that is forwarded to the solver containing
-                    arguments, eg {'type': 'solver::Cg', 'criteria': {'max_iters': 100}}
+                solver_args - An optional dictionary containing 
+                    arguments forwarded to the solver, 
+                    for example: {"type": "solver::Cg", "criteria": {"max_iters": 100}}.
     Returns: the solver
     """
 
@@ -172,6 +173,10 @@ def generate_solver(A, solver_args=None):
                 {"type": "ResidualNorm", "reduction_factor": 1e-7},
             ],
         }
+    elif not isinstance(solver_args, dict):
+        raise TypeError(
+            "solver_args must be a dictionary or None"
+        )
     solver_executor = A.get_executor()
      # TODO: Create a better way to check the dtype of the matrix
     dtype = type(A).__name__.split('_')[1]
