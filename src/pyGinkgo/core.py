@@ -59,6 +59,7 @@ def as_tensor(
             obj = obj.__array__()
 
     array_cls = getattr(pGB.matrix, "dense_" + dtype)
+    # Check explicitly for None because obj may contain a multi-element NumPy array.
     if obj is not None:
         return array_cls(executor, obj)
 
