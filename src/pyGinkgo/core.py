@@ -116,12 +116,23 @@ def _try_normalize_dtype(dtype, allowed_types):
         return None
 
 
+def _try_infer_dtype(obj, allowed_types):
+    try:
+        return _infer_dtype(obj, allowed_types, name="input")
+    except ValueError:
+        return None
+    
+
 def _normalize_value_dtype(dtype):
     return _normalize_dtype(dtype, gko_types.ValueType, "dtype")
 
 
 def _normalize_array_dtype(dtype):
     return _normalize_dtype(dtype, gko_types.dtype, "dtype")
+
+
+def _normalize_index_dtype(dtype):
+    return _normalize_dtype(dtype, gko_types.IndexType, "itype")
 
 
 def _dtype_from_binding_name(obj, allowed_types):
@@ -188,19 +199,91 @@ def _infer_dtype(obj, allowed_types, *, name):
     )
 
 
-def as_array(obj, device: gko_types.DeviceType = "cpu", dtype="float"):
-    """create a ginkgo array from a given object"""
-    if not dtype in gko_types.dtype:
-        raise ValueError(
-            f"Not a valid dtype: {dtype}. " +
-            "Possible choices are: " +
-            ', '.join(t for t in gko_types.dtype)
+def _infer_sparse_value_dtype(matrix_format, obj, data, dtype):
+    if dtype is not None:
+        return _normalize_value_dtype(dtype)
+
+    source = data
+    if source is None and obj is not None and hasattr(obj, "data"):
+        source = obj.data
+    if source is None:
+        source = obj
+
+    return _infer_dtype(
+        source,
+        gko_types.ValueType,
+        name=f"{matrix_format} value input",
+    )
+
+
+def _sparse_index_sources(matrix_format, obj, cols, rows):
+    if cols is not None or rows is not None:
+        return [source for source in (cols, rows) if source is not None]
+
+    if obj is None:
+        return []
+
+    if matrix_format == "Csr":
+        return [
+            getattr(obj, name)
+            for name in ("indices", "indptr")
+            if hasattr(obj, name)
+        ]
+
+    return [
+        getattr(obj, name)
+        for name in ("col", "row")
+        if hasattr(obj, name)
+    ]
+
+
+def _infer_sparse_index_dtype(matrix_format, obj, cols, rows, itype):
+    if itype is not None:
+        return _normalize_index_dtype(itype)
+
+    inferred = [
+        dtype
+        for dtype in (
+            _try_infer_dtype(source, gko_types.IndexType)
+            for source in _sparse_index_sources(matrix_format, obj, cols, rows)
         )
-    
-    executor = pg.device(device)
-    
-    array_cls = getattr(pGB.base, "array_" + dtype)
-    return array_cls(executor, obj)
+        if dtype is not None
+    ]
+
+    if not inferred:
+        raise ValueError(
+            f"Cannot infer itype for {matrix_format} index input. "
+            "Please specify itype. "
+            f"Possible choices are: {_dtype_choices(gko_types.IndexType)}"
+        )
+
+    if len(set(inferred)) > 1:
+        raise ValueError(
+            f"Cannot infer a single itype for {matrix_format} index input. "
+            f"Found: {', '.join(sorted(set(inferred)))}. "
+            "Please specify itype."
+        )
+
+    return inferred[0]
+
+
+def _require_sparse_components(matrix_format, dim, data, cols, rows):
+    missing = [
+        name
+        for name, value in (
+            ("dim", dim),
+            ("data", data),
+            ("cols", cols),
+            ("rows", rows),
+        )
+        if value is None
+    ]
+    if missing:
+        raise ValueError(
+            f"{matrix_format} component construction requires dim, data, "
+            f"cols, and rows. Missing: {', '.join(missing)}."
+        )
+
 
 def array(obj, device: gko_types.DeviceType = "cpu", dtype=None):
     """Create a Ginkgo array, inferring dtype from obj when possible."""
@@ -219,42 +302,6 @@ def array(obj, device: gko_types.DeviceType = "cpu", dtype=None):
     array_cls = getattr(pGB.base, "array_" + dtype)
     return array_cls(executor, obj)
 
-
-def as_tensor(
-    obj = None,
-    dim: Optional[tuple] = None,
-    device: gko_types.DeviceType = "cpu",
-    dtype: Union[gko_types.ValueType, str] = "float",
-    fill: Optional[float] = None,
-):
-    """create a ginkgo array from a given object"""
-    dtype = str(dtype)
-    if dtype not in gko_types.ValueType.values():
-        raise ValueError(
-            f"Not a valid dtype: {dtype}. " +
-            "Possible choices are: " +
-            ', '.join(t for t in gko_types.ValueType)
-        )
-    
-    executor = pg.device(device)
-
-    if torch_avail:
-        if isinstance(obj, torch.Tensor):
-            obj = obj.__array__()
-
-    array_cls = getattr(pGB.matrix, "dense_" + dtype)
-    # Check explicitly for None because obj may contain a multi-element NumPy array.
-    if obj is not None:
-        return array_cls(executor, obj)
-
-    if dim is None:
-        raise ValueError("Either obj or dim must be provided.")
-    
-    res = array_cls(executor, dim)
-    if fill is not None:
-        res.fill(fill)
-        
-    return res
 
 def dense(
     obj=None,
@@ -303,6 +350,153 @@ def dense(
         res.fill(fill)
 
     return res
+
+
+def _sparse_matrix(
+    matrix_format,
+    obj=None,
+    *,
+    device: gko_types.DeviceType = "cpu",
+    dtype=None,
+    itype=None,
+    dim=None,
+    data=None,
+    cols=None,
+    rows=None,
+):
+    component_args = (dim, data, cols, rows)
+    use_components = any(value is not None for value in component_args)
+
+    if obj is not None and use_components:
+        raise ValueError(
+            f"Pass either a {matrix_format}-like object or component "
+            "arrays, not both."
+        )
+
+    if obj is None and not use_components:
+        if dtype is None:
+            raise ValueError(
+                f"Cannot infer dtype for {matrix_format} allocation. "
+                "Please specify dtype."
+            )
+        if itype is None:
+            raise ValueError(
+                f"Cannot infer itype for {matrix_format} allocation. "
+                "Please specify itype."
+            )
+
+    if use_components:
+        _require_sparse_components(matrix_format, dim, data, cols, rows)
+
+    dtype = _infer_sparse_value_dtype(matrix_format, obj, data, dtype)
+    itype = _infer_sparse_index_dtype(matrix_format, obj, cols, rows, itype)
+
+    executor = pg.device(device)
+    matrix_cls = getattr(pGB.matrix, f"{matrix_format}_{dtype}_{itype}")
+
+    if use_components:
+        return matrix_cls(executor, dim, data, cols, rows)
+    if obj is not None:
+        return matrix_cls(executor, obj)
+    return matrix_cls(executor)
+
+
+def Csr(
+    obj=None,
+    *,
+    device: gko_types.DeviceType = "cpu",
+    dtype=None,
+    itype=None,
+    dim=None,
+    data=None,
+    cols=None,
+    rows=None,
+):
+    """Create a Ginkgo CSR matrix, inferring dtype and itype when possible."""
+    return _sparse_matrix(
+        "Csr",
+        obj,
+        device=device,
+        dtype=dtype,
+        itype=itype,
+        dim=dim,
+        data=data,
+        cols=cols,
+        rows=rows,
+    )
+
+
+def Coo(
+    obj=None,
+    *,
+    device: gko_types.DeviceType = "cpu",
+    dtype=None,
+    itype=None,
+    dim=None,
+    data=None,
+    cols=None,
+    rows=None,
+):
+    """Create a Ginkgo COO matrix, inferring dtype and itype when possible."""
+    return _sparse_matrix(
+        "Coo",
+        obj,
+        device=device,
+        dtype=dtype,
+        itype=itype,
+        dim=dim,
+        data=data,
+        cols=cols,
+        rows=rows,
+    )
+
+
+def as_array(obj, device: gko_types.DeviceType = "cpu", dtype="float"):
+    """create a ginkgo array from a given object"""
+    if not dtype in gko_types.dtype:
+        raise ValueError(
+            f"Not a valid dtype: {dtype}. " +
+            "Possible choices are: " +
+            ', '.join(t for t in gko_types.dtype)
+        )
+    
+    executor = pg.device(device)
+    
+    array_cls = getattr(pGB.base, "array_" + dtype)
+    return array_cls(executor, obj)
+
+
+def as_tensor(
+    obj = None,
+    dim: Optional[tuple] = None,
+    device: gko_types.DeviceType = "cpu",
+    dtype: Union[gko_types.ValueType, str] = "float",
+    fill: Optional[float] = None,
+):
+    """create a ginkgo array from a given object"""
+    if not dtype in gko_types.ValueType.values():
+        raise ValueError(
+            f"Not a valid dtype: {dtype}. " +
+            "Possible choices are: " +
+            ', '.join(t for t in gko_types.ValueType)
+        )
+    
+    executor = pg.device(device)
+
+    if torch_avail:
+        if isinstance(obj, torch.Tensor):
+            obj = obj.__array__()
+
+    array_cls = getattr(pGB.matrix, "dense_" + dtype)
+    if obj:
+        return array_cls(executor, obj)
+    else:
+        res = array_cls(executor, dim)
+        
+        if fill is not None:
+            res.fill(fill)
+        
+        return res
 
 
 def read(
