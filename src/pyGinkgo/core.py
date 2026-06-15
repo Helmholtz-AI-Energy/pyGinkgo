@@ -116,6 +116,10 @@ def _try_normalize_dtype(dtype, allowed_types):
         return None
 
 
+def _normalize_value_dtype(dtype):
+    return _normalize_dtype(dtype, gko_types.ValueType, "dtype")
+
+
 def _normalize_array_dtype(dtype):
     return _normalize_dtype(dtype, gko_types.dtype, "dtype")
 
@@ -250,6 +254,54 @@ def as_tensor(
     if fill is not None:
         res.fill(fill)
         
+    return res
+
+def dense(
+    obj=None,
+    dim: Optional[tuple] = None,
+    device: gko_types.DeviceType = "cpu",
+    dtype=None,
+    fill: Optional[float] = None,
+    stride: Optional[int] = None,
+):
+    """Create a Ginkgo dense matrix, inferring dtype from obj when possible."""
+    if dtype is None:
+        if obj is None:
+            raise ValueError(
+                "Cannot infer dtype for dense allocation. "
+                "Please specify dtype."
+            )
+        dtype = _infer_dtype(obj, gko_types.ValueType, name="dense input")
+    else:
+        dtype = _normalize_value_dtype(dtype)
+
+    executor = pg.device(device)
+    dense_cls = getattr(pGB.matrix, "dense_" + dtype)
+
+    if torch_avail and isinstance(obj, torch.Tensor):
+        obj = obj.__array__()
+    elif isinstance(obj, tuple):
+        obj = np.asarray(obj)
+
+    if obj is None:
+        if dim is None:
+            res = dense_cls(executor)
+        elif stride is None:
+            res = dense_cls(executor, dim)
+        else:
+            res = dense_cls(executor, dim, stride)
+    elif dim is None:
+        res = dense_cls(executor, obj)
+    else:
+        if stride is None:
+            raise ValueError(
+                "dense construction with obj and dim requires stride."
+            )
+        res = dense_cls(executor, dim, obj, stride)
+
+    if fill is not None:
+        res.fill(fill)
+
     return res
 
 
