@@ -22,6 +22,168 @@ except ImportError:
 
 # TODO: add tests for the functions in this file
 
+_STRING_DTYPE_ALIASES = {
+    "half": "half",
+    "float16": "half",
+    "float": "float",
+    "float32": "float",
+    "single": "float",
+    "double": "double",
+    "float64": "double",
+    "int32": "int32",
+    "int64": "int64",
+    "longlong": "int64",
+}
+
+
+def _dtype_values(allowed_types):
+    if hasattr(allowed_types, "values"):
+        return allowed_types.values()
+    return [str(dtype) for dtype in allowed_types]
+
+
+def _dtype_choices(allowed_types):
+    return ", ".join(_dtype_values(allowed_types))
+
+
+def _numpy_to_gko_map(allowed_types):
+    values = set(_dtype_values(allowed_types))
+    mapping = {}
+    if values.intersection(gko_types.ValueType.values()):
+        mapping.update(gko_types.NUMPY_TO_GKO_VALUE)
+    if values.intersection(gko_types.IndexType.values()):
+        mapping.update(gko_types.NUMPY_TO_GKO_INDEX)
+    return mapping
+
+
+def _normalize_numpy_dtype(dtype, allowed_types):
+    try:
+        np_dtype = np.dtype(dtype)
+    except (TypeError, ValueError):
+        return None
+
+    dtype_name = _numpy_to_gko_map(allowed_types).get(np_dtype.type)
+    if dtype_name in _dtype_values(allowed_types):
+        return dtype_name
+    return None
+
+
+def _normalize_torch_dtype(dtype, allowed_types):
+    if not torch_avail:
+        return None
+
+    torch_map = {
+        torch.float16: "half",
+        torch.float32: "float",
+        torch.float64: "double",
+        torch.int32: "int32",
+        torch.int64: "int64",
+    }
+    dtype_name = torch_map.get(dtype)
+    if dtype_name in _dtype_values(allowed_types):
+        return dtype_name
+    return None
+
+
+def _normalize_dtype(dtype, allowed_types, name):
+    if dtype is None:
+        return None
+
+    dtype_values = _dtype_values(allowed_types)
+    torch_dtype = _normalize_torch_dtype(dtype, allowed_types)
+    if torch_dtype is not None:
+        return torch_dtype
+
+    if isinstance(dtype, str):
+        dtype_name = _STRING_DTYPE_ALIASES.get(dtype.lower(), dtype)
+        if dtype_name in dtype_values:
+            return dtype_name
+
+    numpy_dtype = _normalize_numpy_dtype(dtype, allowed_types)
+    if numpy_dtype is not None:
+        return numpy_dtype
+
+    raise ValueError(
+        f"Not a valid {name}: {dtype}. "
+        f"Possible choices are: {_dtype_choices(allowed_types)}"
+    )
+
+
+def _try_normalize_dtype(dtype, allowed_types):
+    try:
+        return _normalize_dtype(dtype, allowed_types, "dtype")
+    except ValueError:
+        return None
+
+
+def _normalize_array_dtype(dtype):
+    return _normalize_dtype(dtype, gko_types.dtype, "dtype")
+
+
+def _dtype_from_binding_name(obj, allowed_types):
+    type_name = type(obj).__name__
+    parts = type_name.split("_")
+    if len(parts) < 2:
+        return None
+
+    dtype_name = parts[1]
+    if dtype_name in _dtype_values(allowed_types):
+        return dtype_name
+    return None
+
+
+def _dtype_from_array_protocol(obj, allowed_types):
+    for protocol_name in ("__cuda_array_interface__", "__array_interface__"):
+        if not hasattr(obj, protocol_name):
+            continue
+        typestr = getattr(obj, protocol_name).get("typestr")
+        dtype_name = _normalize_numpy_dtype(typestr, allowed_types)
+        if dtype_name is not None:
+            return dtype_name
+
+    return None
+
+
+def _infer_dtype(obj, allowed_types, *, name):
+    if obj is None:
+        raise ValueError(
+            f"Cannot infer dtype for {name}. Please specify dtype. "
+            f"Possible choices are: {_dtype_choices(allowed_types)}"
+        )
+
+    binding_dtype = _dtype_from_binding_name(obj, allowed_types)
+    if binding_dtype is not None:
+        return binding_dtype
+
+    if hasattr(obj, "dtype"):
+        dtype_name = _try_normalize_dtype(obj.dtype, allowed_types)
+        if dtype_name is not None:
+            return dtype_name
+
+    protocol_dtype = _dtype_from_array_protocol(obj, allowed_types)
+    if protocol_dtype is not None:
+        return protocol_dtype
+
+    try:
+        np_array = np.asarray(obj)
+    except Exception:
+        np_array = None
+
+    if (
+        np_array is not None
+        and np_array.size > 0
+        and np_array.dtype != np.dtype("O")
+    ):
+        dtype_name = _normalize_numpy_dtype(np_array.dtype, allowed_types)
+        if dtype_name is not None:
+            return dtype_name
+
+    raise ValueError(
+        f"Cannot infer dtype for {name}. Please specify dtype. "
+        f"Possible choices are: {_dtype_choices(allowed_types)}"
+    )
+
+
 def as_array(obj, device: gko_types.DeviceType = "cpu", dtype="float"):
     """create a ginkgo array from a given object"""
     if not dtype in gko_types.dtype:
@@ -33,6 +195,23 @@ def as_array(obj, device: gko_types.DeviceType = "cpu", dtype="float"):
     
     executor = pg.device(device)
     
+    array_cls = getattr(pGB.base, "array_" + dtype)
+    return array_cls(executor, obj)
+
+def array(obj, device: gko_types.DeviceType = "cpu", dtype=None):
+    """Create a Ginkgo array, inferring dtype from obj when possible."""
+    if dtype is None and isinstance(obj, int):
+        raise ValueError(
+            "Cannot infer dtype for array size allocation. "
+            "Please specify dtype."
+        )
+
+    dtype = (
+        _infer_dtype(obj, gko_types.dtype, name="array input")
+        if dtype is None
+        else _normalize_array_dtype(dtype)
+    )
+    executor = pg.device(device)
     array_cls = getattr(pGB.base, "array_" + dtype)
     return array_cls(executor, obj)
 
