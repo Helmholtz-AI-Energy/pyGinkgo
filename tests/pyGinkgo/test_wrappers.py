@@ -52,6 +52,10 @@ class TestArrayWrapper:
         with pytest.raises(ValueError, match="Not a valid dtype.*complex64"):
             pg.array(data, dtype="complex64")
 
+    def test_missing_dtype_for_numpy_integer_allocation_raises_clear_error(self):
+        with pytest.raises(ValueError, match="Cannot infer dtype.*specify dtype"):
+            pg.array(np.int64(3))
+
 
 class TestDenseWrapper:
     def test_infers_float_from_numpy_array(self):
