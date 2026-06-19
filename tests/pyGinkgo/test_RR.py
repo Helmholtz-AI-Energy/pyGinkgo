@@ -5,13 +5,19 @@
 import sys
 
 sys.path.append("../../")
-import pyGinkgo as pg
-import pyGinkgo.pyGinkgoBindings as pGB
-
 import numpy as np
 import os
 import pytest
 
+try:
+    import torch
+
+    torch_avail = True
+except ImportError:
+    torch_avail = False
+
+import pyGinkgo as pg
+import pyGinkgo.pyGinkgoBindings as pGB
 
 d_precision_map = {
     "half": 1e-3,
@@ -20,6 +26,7 @@ d_precision_map = {
 }
 
 
+@pytest.mark.skipif(not torch_avail, reason="requires pytorch")
 @pytest.mark.parametrize("data_type", list(pg.gko_types.ValueType))
 class TestSolve:
     executor = pGB.ReferenceExecutor()

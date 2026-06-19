@@ -10,22 +10,27 @@ try:
 
     torch_avail = True
 except ImportError:
+    torch = None
     torch_avail = False
 
 import pyGinkgo as pg
 import pyGinkgo.pyGinkgoBindings as pGB
 
 
-torch_d_type_map = {
-    "half": torch.float16,
-    "float": torch.float32,
-    "double": torch.float64,
-}
+torch_d_type_map = (
+    {
+        "half": torch.float16,
+        "float": torch.float32,
+        "double": torch.float64,
+    }
+    if torch_avail
+    else {}
+)
 
 
 @pytest.mark.skipif(not torch_avail, reason="requires pytorch")
 @pytest.mark.parametrize("data_type", list(pg.gko_types.ValueType))
-class TestTorchInteroperability:
+class TestSolve:
     def test_can_create_array_from_torch(self, data_type: pg.gko_types.ValueType):
         executor = pGB.ReferenceExecutor()
         array_cls = getattr(pGB.base, "array_" + data_type)
