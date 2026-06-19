@@ -287,7 +287,7 @@ def _require_sparse_components(matrix_format, dim, data, cols, rows):
 
 def array(obj, device: gko_types.DeviceType = "cpu", dtype=None):
     """Create a Ginkgo array, inferring dtype from obj when possible."""
-    if dtype is None and isinstance(obj, int):
+    if dtype is None and isinstance(obj, (int, np.integer)) and not isinstance(obj, bool):
         raise ValueError(
             "Cannot infer dtype for array size allocation. "
             "Please specify dtype."
