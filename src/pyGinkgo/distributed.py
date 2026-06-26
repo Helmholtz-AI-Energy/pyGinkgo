@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2024 - 2026 pyGinkgo authors
+# SPDX-FileCopyrightText: 2026 Imad Kissami
 #
 # SPDX-License-Identifier: MIT
 
