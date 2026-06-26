@@ -36,7 +36,7 @@ if not pg.distributed.available:
 
 # ---------------------------------------------------------------- parameters
 N = 16                       # global system size
-executor = pg.device("cpu")  # "cpu", "omp", or "cuda" / "cuda:0"
+executor = pg.device("cuda")  # "cpu", "omp", or "cuda" / "cuda:0"
 value = "double"             # matches np.float64
 
 # ----------------------------------------------------- row distribution (1D)
