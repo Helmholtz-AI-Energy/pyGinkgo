@@ -151,6 +151,25 @@ def eigen_solve(A,solver_args=None):
     hY = dense_cls(exec_obj, Q.__array__())
     return Lambda, hY
 
+def get_solver_default_config():
+    """Return the default solver configuration.
+
+    A new dictionary is returned on each call to avoid sharing mutable
+    default configuration between function calls.
+    """
+    return {
+        "type": "solver::Gmres",
+        "preconditioner": {
+            "type": "preconditioner::Ilu",
+            "reverse_apply": False,
+            "factorization": {"type": "factorization::ParIlu"},
+        },
+        "criteria": [
+            {"type": "Iteration", "max_iters": 1000},
+            {"type": "ResidualNorm", "reduction_factor": 1e-7},
+        ],
+    }
+
 def generate_solver(A, solver_args: Optional[dict] = None):
     """Generate a solver based on the system matrix A
 
@@ -162,22 +181,8 @@ def generate_solver(A, solver_args: Optional[dict] = None):
     """
 
     if solver_args is None or solver_args == {}:
-        solver_args = {
-            "type": "solver::Gmres",
-            "preconditioner": {
-                "type": "preconditioner::Ilu",
-                "reverse_apply": False,
-                "factorization": {"type": "factorization::ParIlu"},
-            },
-            "criteria": [
-                {"type": "Iteration", "max_iters": 1000},
-                {"type": "ResidualNorm", "reduction_factor": 1e-7},
-            ],
-        }
-    elif not isinstance(solver_args, dict):
-        raise TypeError(
-            "solver_args must be a dictionary or None"
-        )
+        solver_args = get_solver_default_config()
+    
     solver_executor = A.get_executor()
      # TODO: Create a better way to check the dtype of the matrix
     dtype = type(A).__name__.split('_')[1]
@@ -187,20 +192,9 @@ def generate_solver(A, solver_args: Optional[dict] = None):
     )
     return solver
 
-def config_solve(A,b,x,solver_args=None):
+def config_solve(A, b, x, solver_args: Optional[dict] = None):
     if solver_args is None or solver_args == {}:
-        solver_args = {
-            "type": "solver::Gmres",
-            "preconditioner": {
-                "type": "preconditioner::Ilu",
-                "reverse_apply": False,
-                "factorization": {"type": "factorization::ParIlu"},
-            },
-            "criteria": [
-                {"type": "Iteration", "max_iters": 1000},
-                {"type": "ResidualNorm", "reduction_factor": 1e-7},
-            ],
-        }
+        solver_args = get_solver_default_config()
 
     solver_executor = A.get_executor()
     dtype = type(A).__name__.split('_')[1]
@@ -229,12 +223,14 @@ def solve(A, b, initial_guess=None, solver_args: Optional[dict] = None, kind="co
     Parameters: A - The system matrix
                 b - The right hand side vector
                 initial_guess - The initial guess
-                solver - The solver
-                solver_args - A dictionary that is forwarded to the solver containing
-                    arguments, eg {'type': 'solver::Cg', 'criteria': [{"type": "Iteration", "max_iters": 100}]}
+                solver_args - An optional dictionary forwarded to the solver, 
+                eg {'type': 'solver::Cg', 'criteria': [{"type": "Iteration", "max_iters": 100}]}
                 kind - the underlying solver, eg. config
     Returns: tuple of a logger object and solution vector
     """
+
+    if solver_args is None or solver_args == {}:
+        solver_args = get_solver_default_config()
 
     ctor = globals()[kind+"_solve"]
 
