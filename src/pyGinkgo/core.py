@@ -4,6 +4,7 @@
 
 import os
 import json
+import copy
 import numpy as np
 from typing import Optional, Union
 
@@ -170,7 +171,7 @@ def get_solver_default_config():
         ],
     }
 
-def generate_solver(A, solver_args: Optional[dict] = None):
+def generate_solver(A, solver_args: dict = get_solver_default_config()):
     """Generate a solver based on the system matrix A
 
     Parameters: A - The system matrix
@@ -180,8 +181,13 @@ def generate_solver(A, solver_args: Optional[dict] = None):
     Returns: the solver
     """
 
-    if solver_args is None or solver_args == {}:
+    if not isinstance(solver_args, dict):
+        raise TypeError("solver_args must be a dictionary.")
+
+    if solver_args == {}:
         solver_args = get_solver_default_config()
+    else:
+        solver_args = copy.deepcopy(solver_args)
     
     solver_executor = A.get_executor()
      # TODO: Create a better way to check the dtype of the matrix
@@ -192,9 +198,14 @@ def generate_solver(A, solver_args: Optional[dict] = None):
     )
     return solver
 
-def config_solve(A, b, x, solver_args: Optional[dict] = None):
-    if solver_args is None or solver_args == {}:
+def config_solve(A, b, x, solver_args: dict = get_solver_default_config()):
+    if not isinstance(solver_args, dict):
+        raise TypeError("solver_args must be a dictionary.")
+
+    if solver_args == {}:
         solver_args = get_solver_default_config()
+    else:
+        solver_args = copy.deepcopy(solver_args)
 
     solver_executor = A.get_executor()
     dtype = type(A).__name__.split('_')[1]
@@ -217,7 +228,7 @@ def triangular_solve(A,b,x,solver_args):
     trs.apply(b, x)
     return None, x
 
-def solve(A, b, initial_guess=None, solver_args: Optional[dict] = None, kind="config"):
+def solve(A, b, initial_guess=None, solver_args: dict = get_solver_default_config(), kind="config"):
     """Solve a given linear system, where A is the system matrix and b the RHS
 
     Parameters: A - The system matrix
@@ -229,8 +240,13 @@ def solve(A, b, initial_guess=None, solver_args: Optional[dict] = None, kind="co
     Returns: tuple of a logger object and solution vector
     """
 
-    if solver_args is None or solver_args == {}:
+    if not isinstance(solver_args, dict):
+        raise TypeError("solver_args must be a dictionary.")
+
+    if solver_args == {}:
         solver_args = get_solver_default_config()
+    else:
+        solver_args = copy.deepcopy(solver_args)
 
     ctor = globals()[kind+"_solve"]
 
