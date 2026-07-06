@@ -474,7 +474,8 @@ def as_tensor(
     fill: Optional[float] = None,
 ):
     """create a ginkgo array from a given object"""
-    if not dtype in gko_types.ValueType.values():
+    dtype = str(dtype)
+    if dtype not in gko_types.ValueType.values():
         raise ValueError(
             f"Not a valid dtype: {dtype}. " +
             "Possible choices are: " +
@@ -488,15 +489,18 @@ def as_tensor(
             obj = obj.__array__()
 
     array_cls = getattr(pGB.matrix, "dense_" + dtype)
-    if obj:
+    # Check explicitly for None because obj may contain a multi-element NumPy array.
+    if obj is not None:
         return array_cls(executor, obj)
-    else:
-        res = array_cls(executor, dim)
+
+    if dim is None:
+        raise ValueError("Either obj or dim must be provided.")
+    
+    res = array_cls(executor, dim)
+    if fill is not None:
+        res.fill(fill)
         
-        if fill is not None:
-            res.fill(fill)
-        
-        return res
+    return res
 
 
 def read(
