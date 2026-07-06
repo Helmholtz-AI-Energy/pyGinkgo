@@ -19,3 +19,4 @@ endfunction()
 
 pyginkgo_python_test(solve)
 pyginkgo_python_test(RR)
+pyginkgo_python_test(core)

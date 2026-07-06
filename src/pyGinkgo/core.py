@@ -4,6 +4,7 @@
 
 import os
 import json
+import copy
 import numpy as np
 from typing import Optional, Union
 
@@ -44,7 +45,8 @@ def as_tensor(
     fill: Optional[float] = None,
 ):
     """create a ginkgo array from a given object"""
-    if not dtype in gko_types.ValueType.values():
+    dtype = str(dtype)
+    if dtype not in gko_types.ValueType.values():
         raise ValueError(
             f"Not a valid dtype: {dtype}. " +
             "Possible choices are: " +
@@ -58,15 +60,18 @@ def as_tensor(
             obj = obj.__array__()
 
     array_cls = getattr(pGB.matrix, "dense_" + dtype)
-    if obj:
+    # Check explicitly for None because obj may contain a multi-element NumPy array.
+    if obj is not None:
         return array_cls(executor, obj)
-    else:
-        res = array_cls(executor, dim)
+
+    if dim is None:
+        raise ValueError("Either obj or dim must be provided.")
+    
+    res = array_cls(executor, dim)
+    if fill is not None:
+        res.fill(fill)
         
-        if fill is not None:
-            res.fill(fill)
-        
-        return res
+    return res
 
 
 def read(
@@ -147,28 +152,43 @@ def eigen_solve(A,solver_args=None):
     hY = dense_cls(exec_obj, Q.__array__())
     return Lambda, hY
 
-def generate_solver(A, solver_args: dict = dict()):
+def get_solver_default_config():
+    """Return the default solver configuration.
+
+    A new dictionary is returned on each call to avoid sharing mutable
+    default configuration between function calls.
+    """
+    return {
+        "type": "solver::Gmres",
+        "preconditioner": {
+            "type": "preconditioner::Ilu",
+            "reverse_apply": False,
+            "factorization": {"type": "factorization::ParIlu"},
+        },
+        "criteria": [
+            {"type": "Iteration", "max_iters": 1000},
+            {"type": "ResidualNorm", "reduction_factor": 1e-7},
+        ],
+    }
+
+def generate_solver(A, solver_args: dict = get_solver_default_config()):
     """Generate a solver based on the system matrix A
 
     Parameters: A - The system matrix
-                solver_args - A dictionary that is forwarded to the solver containing
-                    arguments, eg {'type': 'solver::Cg', 'criteria': {'max_iters': 100}}
+                solver_args - An optional dictionary containing 
+                    arguments forwarded to the solver, 
+                    for example: {"type": "solver::Cg", "criteria": [{"type": "Iteration", "max_iters": 100}]}.
     Returns: the solver
     """
 
-    if not solver_args:
-        solver_args = {
-            "type": "solver::Gmres",
-            "preconditioner": {
-                "type": "preconditioner::Ilu",
-                "reverse_apply": False,
-                "factorization": {"type": "factorization::ParIlu"},
-            },
-            "criteria": [
-                {"type": "Iteration", "max_iters": 1000},
-                {"type": "ResidualNorm", "reduction_factor": 1e-7},
-            ],
-        }
+    if not isinstance(solver_args, dict):
+        raise TypeError("solver_args must be a dictionary.")
+
+    if solver_args == {}:
+        solver_args = get_solver_default_config()
+    else:
+        solver_args = copy.deepcopy(solver_args)
+    
     solver_executor = A.get_executor()
      # TODO: Create a better way to check the dtype of the matrix
     dtype = type(A).__name__.split('_')[1]
@@ -178,20 +198,14 @@ def generate_solver(A, solver_args: dict = dict()):
     )
     return solver
 
-def config_solve(A,b,x,solver_args=None):
-    if not solver_args:
-        solver_args = {
-            "type": "solver::Gmres",
-            "preconditioner": {
-                "type": "preconditioner::Ilu",
-                "reverse_apply": False,
-                "factorization": {"type": "factorization::ParIlu"},
-            },
-            "criteria": [
-                {"type": "Iteration", "max_iters": 1000},
-                {"type": "ResidualNorm", "reduction_factor": 1e-7},
-            ],
-        }
+def config_solve(A, b, x, solver_args: dict = get_solver_default_config()):
+    if not isinstance(solver_args, dict):
+        raise TypeError("solver_args must be a dictionary.")
+
+    if solver_args == {}:
+        solver_args = get_solver_default_config()
+    else:
+        solver_args = copy.deepcopy(solver_args)
 
     solver_executor = A.get_executor()
     dtype = type(A).__name__.split('_')[1]
@@ -214,22 +228,29 @@ def triangular_solve(A,b,x,solver_args):
     trs.apply(b, x)
     return None, x
 
-def solve(A, b, initial_guess=None, solver_args: dict = dict(), kind="config"):
+def solve(A, b, initial_guess=None, solver_args: dict = get_solver_default_config(), kind="config"):
     """Solve a given linear system, where A is the system matrix and b the RHS
 
     Parameters: A - The system matrix
                 b - The right hand side vector
                 initial_guess - The initial guess
-                solver - The solver
-                solver_args - A dictionary that is forwarded to the solver containing
-                    arguments, eg {'type': 'solver::Cg', 'criteria': {'max_iters': 100}}
+                solver_args - An optional dictionary forwarded to the solver, 
+                eg {'type': 'solver::Cg', 'criteria': [{"type": "Iteration", "max_iters": 100}]}
                 kind - the underlying solver, eg. config
     Returns: tuple of a logger object and solution vector
     """
 
+    if not isinstance(solver_args, dict):
+        raise TypeError("solver_args must be a dictionary.")
+
+    if solver_args == {}:
+        solver_args = get_solver_default_config()
+    else:
+        solver_args = copy.deepcopy(solver_args)
+
     ctor = globals()[kind+"_solve"]
 
-    if not initial_guess:
+    if initial_guess is None:
         dtype = type(A).__name__.split('_')[1]
         dense_cls = getattr(pGB.matrix, f"dense_{dtype}")
         dim = (A.shape[1], b.shape[1])
