@@ -283,6 +283,76 @@ def _require_sparse_components(matrix_format, dim, data, cols, rows):
             f"{matrix_format} component construction requires dim, data, "
             f"cols, and rows. Missing: {', '.join(missing)}."
         )
+    
+def _executor_device_info(executor):
+    if isinstance(executor, (pGB.ReferenceExecutor, pGB.OmpExecutor)):
+        return "cpu", None
+
+    if hasattr(pGB, "CudaExecutor") and isinstance(executor, pGB.CudaExecutor):
+        return "cuda", getattr(executor, "device_id", None)
+
+    if hasattr(pGB, "HipExecutor") and isinstance(executor, pGB.HipExecutor):
+        return "hip", getattr(executor, "device_id", None)
+
+    if hasattr(pGB, "DpcppExecutor") and isinstance(executor, pGB.DpcppExecutor):
+        return "dpcpp", getattr(executor, "device_id", None)
+
+    return "unknown", None
+
+
+def _device_arg_info(device):
+    if isinstance(device, pGB.Executor):
+        return _executor_device_info(device)
+
+    device_type, _, device_index = str(device).partition(":")
+    device_type = device_type.lower()
+
+    if gko_types.ExecutorType.cpu in device_type:
+        return "cpu", None
+
+    if gko_types.ExecutorType.omp in device_type:
+        return "cpu", None
+
+    if gko_types.ExecutorType.cuda in device_type:
+        return "cuda", int(device_index) if device_index else 0
+
+    if gko_types.ExecutorType.hip in device_type:
+        return "hip", int(device_index) if device_index else 0
+
+    if gko_types.ExecutorType.dpcpp in device_type:
+        return "dpcpp", int(device_index) if device_index else 0
+
+    return "unknown", None
+
+
+def _torch_device_info(tensor):
+    kind = tensor.device.type
+
+    if kind == "cpu":
+        return "cpu", None
+
+    return kind, tensor.device.index
+
+
+def _format_device_info(kind, index):
+    if index is None:
+        return kind
+    return f"{kind}:{index}"
+
+
+def _validate_torch_dense_device(obj, device):
+    tensor_kind, tensor_index = _torch_device_info(obj)
+    requested_kind, requested_index = _device_arg_info(device)
+
+    if (tensor_kind, tensor_index) == (requested_kind, requested_index):
+        return
+
+    raise ValueError(
+        "Torch tensor device does not match Ginkgo executor device: "
+        f"tensor is on '{obj.device}', but dense() was requested on "
+        f"'{_format_device_info(requested_kind, requested_index)}'. "
+        "Explicit device copies are not supported yet."
+    )
 
 
 def array(obj, device: gko_types.DeviceType = "cpu", dtype=None):
@@ -322,13 +392,13 @@ def dense(
     else:
         dtype = _normalize_value_dtype(dtype)
 
-    executor = pg.device(device)
-    dense_cls = getattr(pGB.matrix, "dense_" + dtype)
-
     if torch_avail and isinstance(obj, torch.Tensor):
-        obj = obj.__array__()
+        _validate_torch_dense_device(obj, device)
     elif isinstance(obj, tuple):
         obj = np.asarray(obj)
+
+    executor = pg.device(device)
+    dense_cls = getattr(pGB.matrix, "dense_" + dtype)
 
     if obj is None:
         if dim is None:

@@ -56,7 +56,7 @@ class TestTorchInteroperability:
         dense_cls = getattr(pGB.matrix, "dense_" + data_type)
         data = [[1.0, 2.0], [3.0, 4.0]]
         torch_tensor = torch.tensor(data, dtype=torch_d_type_map[data_type])
-        dense = dense_cls(executor, torch_tensor.__array__())
+        dense = dense_cls(executor, torch_tensor)
         assert dense.get_num_stored_elements() == 4
         assert dense.at(0, 1) == 2.0
         assert dense.at(1, 1) == 4.0
@@ -80,3 +80,67 @@ class TestTorchInteroperability:
         assert torch_tensor[0][1].item() == 2.0
         assert torch_tensor[1][0].item() == 3.0
         assert torch_tensor[1][1].item() == 4.0
+
+    def test_dense_accepts_cpu_torch_tensor(self, data_type: pg.gko_types.ValueType):
+        data = torch.tensor([[1.0, 2.0]], dtype=torch_d_type_map[data_type])
+
+        dense = pg.dense(data, device="cpu")
+
+        assert dense.shape == (1, 2)
+        assert dense.at(0, 0) == 1.0
+        assert dense.at(0, 1) == 2.0
+
+    def test_dense_accepts_cpu_torch_tensor_on_omp(
+        self, data_type: pg.gko_types.ValueType
+    ):
+        data = torch.tensor([[1.0, 2.0]], dtype=torch_d_type_map[data_type])
+
+        dense = pg.dense(data, device="omp")
+
+        assert dense.shape == (1, 2)
+        assert dense.at(0, 0) == 1.0
+        assert dense.at(0, 1) == 2.0
+
+    def test_dense_rejects_cpu_torch_tensor_on_cuda(
+        self, data_type: pg.gko_types.ValueType
+    ):
+        data = torch.tensor([[1.0, 2.0]], dtype=torch_d_type_map[data_type])
+
+        with pytest.raises(ValueError, match="Torch tensor device does not match"):
+            pg.dense(data, device="cuda")
+
+    @pytest.mark.skipif(
+        not torch.cuda.is_available() or not hasattr(pGB, "CudaExecutor"),
+        reason="requires CUDA torch and CUDA pyGinkgo bindings",
+    )
+    def test_dense_rejects_cuda_torch_tensor_on_different_cuda_device(
+        self, data_type: pg.gko_types.ValueType
+    ):
+        if torch.cuda.device_count() < 2:
+            pytest.skip("requires at least two CUDA devices")
+
+        data = torch.tensor(
+            [[1.0, 2.0]],
+            dtype=torch_d_type_map[data_type],
+            device="cuda:1",
+        )
+
+        with pytest.raises(ValueError, match="Torch tensor device does not match"):
+            pg.dense(data, device="cuda:0")
+
+    @pytest.mark.skipif(
+        not torch.cuda.is_available() or not hasattr(pGB, "CudaExecutor"),
+        reason="requires CUDA torch and CUDA pyGinkgo bindings",
+    )
+    def test_dense_accepts_cuda_torch_tensor_on_same_cuda_device(
+        self, data_type: pg.gko_types.ValueType
+    ):
+        data = torch.tensor(
+            [[1.0, 2.0]],
+            dtype=torch_d_type_map[data_type],
+            device="cuda:0",
+        )
+
+        dense = pg.dense(data, device="cuda:0")
+
+        assert dense.shape == (1, 2)
