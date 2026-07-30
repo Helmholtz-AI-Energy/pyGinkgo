@@ -24,7 +24,8 @@ classifiers = [
 keywords = ["sparse-linear-algebra", "high-performance-computing", "krylov-methods", "spmv", "gpu-computing"]
 requires-python = ">=3.8"
 dependencies = [
-    "pybind11==2.12.0"
+    "pybind11==2.12.0",
+    "numpy>=1.19.0",
 ]
 
 [build-system]
@@ -53,7 +54,17 @@ test = [
 ]
 
 [tool.cibuildwheel]
+# CPython only; skip PyPy, musl, 32-bit and the legacy manylinux i686 targets.
+build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
+skip = "pp* *-musllinux* *-win32 *-manylinux_i686"
 build-verbosity = 1
-environment = { PY_BUILD_CMAKE_VERBOSE="1" }
-test-command = "pytest {package}/tests"
-test-extras = ["test"]
+environment = { PY_BUILD_CMAKE_VERBOSE = "1" }
+# Lightweight smoke test of the repaired wheel (see NeoN's approach). The full
+# pytest suite pulls heavy optional deps (torch) and data files, so it is not
+# run against every wheel here.
+test-command = "python {project}/ci/check_installed_wheel.py"
+
+[tool.cibuildwheel.macos.environment]
+# Ginkgo/pybind11 use C++14/17 features that need a modern libc++. Match a
+# recent macOS floor so the x86_64 default does not fail to compile.
+MACOSX_DEPLOYMENT_TARGET = "11.0"
