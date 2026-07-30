@@ -18,6 +18,42 @@ The tests successfully run on the following Python versions:
 
 ## Installation
 
+### Installing via pip (recommended)
+
+Pre-built wheels are the quickest way to get pyGinkgo. They bundle Ginkgo, so no
+separate Ginkgo installation or compilation is required. Wheels support CPython
+3.9–3.13.
+
+**CPU (from PyPI).** CPU wheels are published to PyPI for Linux (x86-64/ARM64),
+Windows (AMD64) and macOS (Apple Silicon/Intel):
+
+```bash
+pip install pyGinkgo
+```
+
+**CUDA (from GitHub Releases).** GPU wheels are *not* published to PyPI because
+they are large and depend on the host NVIDIA driver. They are attached to the
+corresponding [GitHub Release](https://github.com/Helmholtz-AI-Energy/pyGinkgo/releases)
+and carry a local version suffix such as `+cuda128`. Download the wheel or
+install it directly by URL:
+
+```bash
+# CUDA 12.8, CPython 3.12, Linux x86-64, NVIDIA Ampere (sm_80)
+pip install https://github.com/Helmholtz-AI-Energy/pyGinkgo/releases/download/v0.0.1/pyGinkgo-0.0.1+cuda128-cp312-cp312-manylinux_2_34_x86_64.whl
+```
+
+The CUDA wheel needs a host NVIDIA driver providing `libcuda.so.1` (it is
+intentionally not bundled); a local CUDA toolkit is not required at runtime.
+
+Verify an installation with:
+
+```bash
+python -c "import pyGinkgo.pyGinkgoBindings as pGB; pGB.ReferenceExecutor().synchronize(); print('pyGinkgo OK')"
+```
+
+To build from source instead (e.g. to enable a compute backend not covered by
+the wheels), follow the sections below.
+
 ### Prerequisites
 
 - Python 3.8+
