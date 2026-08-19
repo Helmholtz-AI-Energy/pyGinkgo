@@ -1,0 +1,248 @@
+name: Build wheels
+
+# Reusable build half of the wheel pipeline, called by python_wheels.yml
+# (manual rehearsals) and release_wheels.yml (releases). It only *builds* and
+# uploads artifacts; publishing deliberately stays in the calling workflows,
+# because PyPI trusted publishing cannot name a reusable workflow as the
+# publisher (see https://github.com/pypi/warehouse/issues/11096).
+
+on:
+  workflow_call:
+    inputs:
+      build_cpu:
+        description: "Build CPU wheels"
+        required: false
+        default: true
+        type: boolean
+      build_gpu:
+        description: "Build the Linux GPU wheel variants"
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: "Tag to derive a stable version from; empty builds a nightly version"
+        required: false
+        default: ""
+        type: string
+    outputs:
+      version:
+        description: "Package version stamped into the wheels"
+        value: ${{ jobs.version.outputs.version }}
+      channel:
+        description: "Either stable or nightly"
+        value: ${{ jobs.version.outputs.channel }}
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Resolve package version
+    runs-on: ubuntu-latest
+    if: github.repository == 'Helmholtz-AI-Energy/pyGinkgo'
+    outputs:
+      channel: ${{ steps.version.outputs.channel }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve stable or nightly version
+        id: version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [[ -n "${RELEASE_TAG}" ]]; then
+            version="${RELEASE_TAG#v}"
+            channel="stable"
+          else
+            serial="$(date -u +%Y%m%d%H%M)${GITHUB_RUN_NUMBER}"
+            version="$(python scripts/set_package_version.py --nightly "${serial}")"
+            channel="nightly"
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "channel=${channel}" >> "${GITHUB_OUTPUT}"
+
+  build-cpu-wheels:
+    name: CPU ${{ matrix.python }} ${{ matrix.os }}
+    needs: version
+    runs-on: ${{ matrix.os }}
+    if: inputs.build_cpu
+    strategy:
+      fail-fast: false
+      matrix:
+        # One job per (platform x Python version) so each wheel builds in
+        # parallel with its own status and log. archs is attached per os below.
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-14, macos-15-intel]
+        python: ["cp39", "cp310", "cp311", "cp312", "cp313"]
+        include:
+          - os: ubuntu-latest
+            archs: x86_64
+          - os: ubuntu-24.04-arm
+            archs: aarch64
+          - os: windows-latest
+            archs: AMD64
+          - os: macos-14
+            archs: arm64
+          - os: macos-15-intel
+            archs: x86_64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up build host Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Stamp package version
+        run: python scripts/set_package_version.py "${{ needs.version.outputs.version }}"
+
+      - name: Install cibuildwheel
+        run: python -m pip install "cibuildwheel>=3,<4"
+
+      - name: Build CPU wheels
+        run: python -m cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_ARCHS: ${{ matrix.archs }}
+          # Build only this job's Python version (overrides the pyproject build list).
+          CIBW_BUILD: ${{ matrix.python }}-*
+          # Reference backend only, matching the minimal portable wheel: no GPU
+          # backends, no MPI, and none of Ginkgo's tests/benchmarks/examples.
+          # py-build-cmake forwards cmake.args verbatim to the configure step
+          # (same override form the README documents for `pip install .`).
+          CIBW_CONFIG_SETTINGS: "override=cmake.args=[-DGINKGO_BUILD_MPI=OFF,-DGINKGO_BUILD_OMP=OFF,-DGINKGO_BUILD_CUDA=OFF,-DGINKGO_BUILD_HIP=OFF,-DGINKGO_BUILD_SYCL=OFF,-DGINKGO_BUILD_TESTS=OFF,-DGINKGO_BUILD_BENCHMARKS=OFF,-DGINKGO_BUILD_EXAMPLES=OFF]"
+
+      - name: Upload CPU wheel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpu-wheels-${{ matrix.os }}-${{ matrix.archs }}-${{ matrix.python }}
+          path: wheelhouse/*.whl
+
+  build-gpu-wheels:
+    name: ${{ matrix.label }} wheels
+    needs: version
+    runs-on: ubuntu-latest
+    if: inputs.build_gpu
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Two CUDA majors, because minor-version compatibility does not span
+          # 12.x -> 13.x: a 12.8 build cannot run on a CUDA 13 installation and
+          # vice versa. Within a major, one build covers the whole line.
+          # Architectures are sm_80 (Ampere) and sm_90 (Hopper); CMake's bare
+          # numbers also embed PTX, so newer cards can JIT.
+          - label: CUDA 12.8
+            suffix: cuda128
+            before_all: bash ci/install_cuda.sh 12.8
+            config_settings: "override=cmake.args=[-DGINKGO_BUILD_CUDA=ON,-DCMAKE_CUDA_ARCHITECTURES=80;90,-DGINKGO_BUILD_MPI=OFF,-DGINKGO_BUILD_OMP=OFF,-DGINKGO_BUILD_HIP=OFF,-DGINKGO_BUILD_SYCL=OFF,-DGINKGO_BUILD_TESTS=OFF,-DGINKGO_BUILD_BENCHMARKS=OFF,-DGINKGO_BUILD_EXAMPLES=OFF]"
+            # The NVIDIA driver library libcuda.so.1 is provided by the user's
+            # installed driver and must not be bundled into the wheel. The CUDA
+            # runtime libraries are small enough to ship inside it.
+            repair_command: >
+              LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
+              auditwheel -v repair --plat manylinux_2_34_x86_64 --exclude libcuda.so.1 -w {dest_dir} {wheel}
+            environment: >
+              PATH=/usr/local/cuda/bin:$PATH
+              LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+              CUDACXX=/usr/local/cuda/bin/nvcc
+              CUDAHOSTCXX=g++
+              CUDAToolkit_ROOT=/usr/local/cuda
+              PY_BUILD_CMAKE_VERBOSE=1
+          - label: CUDA 13.3
+            suffix: cuda133
+            before_all: bash ci/install_cuda.sh 13.3
+            config_settings: "override=cmake.args=[-DGINKGO_BUILD_CUDA=ON,-DCMAKE_CUDA_ARCHITECTURES=80;90,-DGINKGO_BUILD_MPI=OFF,-DGINKGO_BUILD_OMP=OFF,-DGINKGO_BUILD_HIP=OFF,-DGINKGO_BUILD_SYCL=OFF,-DGINKGO_BUILD_TESTS=OFF,-DGINKGO_BUILD_BENCHMARKS=OFF,-DGINKGO_BUILD_EXAMPLES=OFF]"
+            repair_command: >
+              LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
+              auditwheel -v repair --plat manylinux_2_34_x86_64 --exclude libcuda.so.1 -w {dest_dir} {wheel}
+            environment: >
+              PATH=/usr/local/cuda/bin:$PATH
+              LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+              CUDACXX=/usr/local/cuda/bin/nvcc
+              CUDAHOSTCXX=g++
+              CUDAToolkit_ROOT=/usr/local/cuda
+              PY_BUILD_CMAKE_VERBOSE=1
+          - label: ROCm 6.4
+            suffix: rocm64
+            before_all: bash ci/install_rocm.sh 6.4
+            config_settings: "override=cmake.args=[-DGINKGO_BUILD_HIP=ON,-DCMAKE_HIP_ARCHITECTURES=gfx90a,-DGINKGO_BUILD_CUDA=OFF,-DGINKGO_BUILD_MPI=OFF,-DGINKGO_BUILD_OMP=OFF,-DGINKGO_BUILD_SYCL=OFF,-DGINKGO_BUILD_TESTS=OFF,-DGINKGO_BUILD_BENCHMARKS=OFF,-DGINKGO_BUILD_EXAMPLES=OFF]"
+            # Unlike CUDA, the ROCm userspace stack is far too large to bundle
+            # (rocBLAS alone ships multi-hundred-MB Tensile kernel archives), so
+            # it is excluded wholesale and has to be present on the host at
+            # import time -- typically via a `module load rocm` on HPC systems.
+            repair_command: >
+              LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH:-}"
+              auditwheel -v repair --plat manylinux_2_34_x86_64
+              --exclude 'libamdhip64.so*' --exclude 'libhsa-runtime64.so*'
+              --exclude 'libhsakmt.so*' --exclude 'libamd_comgr.so*'
+              --exclude 'libhiprtc.so*'
+              --exclude 'librocblas.so*' --exclude 'libhipblas.so*'
+              --exclude 'librocsparse.so*' --exclude 'libhipsparse.so*'
+              --exclude 'librocrand.so*' --exclude 'libhiprand.so*'
+              --exclude 'libroctx64.so*'
+              -w {dest_dir} {wheel}
+            environment: >
+              ROCM_PATH=/opt/rocm
+              PATH=/opt/rocm/bin:$PATH
+              LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH
+              CMAKE_PREFIX_PATH=/opt/rocm
+              HIP_PLATFORM=amd
+              PY_BUILD_CMAKE_VERBOSE=1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up build host Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Stamp GPU package version
+        run: python scripts/set_package_version.py "${{ needs.version.outputs.version }}+${{ matrix.suffix }}"
+
+      - name: Install cibuildwheel
+        run: python -m pip install "cibuildwheel>=3,<4"
+
+      - name: Build GPU wheels
+        run: python -m cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: "cp312-manylinux_x86_64"
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_34
+          CIBW_BEFORE_ALL_LINUX: ${{ matrix.before_all }}
+          CIBW_CONFIG_SETTINGS: ${{ matrix.config_settings }}
+          # Which vendor libraries stay outside the wheel differs per backend,
+          # so both are supplied by the matrix entry.
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: ${{ matrix.repair_command }}
+          CIBW_ENVIRONMENT_LINUX: ${{ matrix.environment }}
+          CIBW_BUILD_VERBOSITY: 1
+          # No GPU on the runner, so the installed-wheel smoke test cannot run.
+          CIBW_TEST_SKIP: "*"
+
+      - name: Upload GPU build failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-build-logs-${{ matrix.suffix }}
+          path: |
+            .py-build-cmake_cache/**/CMake*.log
+            .py-build-cmake_cache/**/CMakeConfigureLog.yaml
+            .py-build-cmake_cache/**/*.log
+          if-no-files-found: ignore
+
+      - name: Upload GPU wheel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-wheels-${{ matrix.suffix }}
+          path: wheelhouse/*.whl

@@ -1,9 +1,13 @@
 name: Python wheels
 
+# Manual wheel builds and rehearsal publishes. Releases are handled by
+# release_wheels.yml; this workflow never triggers on its own.
+#
+# The publish jobs live here rather than in the reusable wheels.yml because
+# PyPI trusted publishing cannot name a reusable workflow as the publisher, so
+# the TestPyPI publisher must be configured against `python_wheels.yml`.
+
 on:
-  push:
-    tags:
-      - "v*.*.*"
   workflow_dispatch:
     inputs:
       build_wheels:
@@ -17,7 +21,7 @@ on:
         default: false
         type: boolean
       build_gpu:
-        description: "Build Linux CUDA wheel variants"
+        description: "Build Linux GPU wheel variants (CUDA and ROCm)"
         required: false
         default: false
         type: boolean
@@ -64,180 +68,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  version:
-    name: Resolve package version
-    runs-on: ubuntu-latest
+  build:
+    name: Build
     if: >
-      github.repository == 'Helmholtz-AI-Energy/pyGinkgo' &&
-      (github.event_name != 'workflow_dispatch' || inputs.build_wheels)
-    outputs:
-      channel: ${{ steps.version.outputs.channel }}
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Resolve stable or nightly version
-        id: version
-        shell: bash
-        run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            version="${GITHUB_REF_NAME#v}"
-            channel="stable"
-          else
-            serial="$(date -u +%Y%m%d%H%M)${GITHUB_RUN_NUMBER}"
-            version="$(python scripts/set_package_version.py --nightly "${serial}")"
-            channel="nightly"
-          fi
-
-          echo "version=${version}" >> "${GITHUB_OUTPUT}"
-          echo "channel=${channel}" >> "${GITHUB_OUTPUT}"
-
-  build-cpu-wheels:
-    name: CPU ${{ matrix.python }} ${{ matrix.os }}
-    needs: version
-    runs-on: ${{ matrix.os }}
-    if: >
-      github.repository == 'Helmholtz-AI-Energy/pyGinkgo' &&
-      (github.event_name != 'workflow_dispatch' || (inputs.build_wheels && inputs.build_cpu))
-    strategy:
-      fail-fast: false
-      matrix:
-        # One job per (platform x Python version) so each wheel builds in
-        # parallel with its own status and log. archs is attached per os below.
-        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-14, macos-15-intel]
-        python: ["cp39", "cp310", "cp311", "cp312", "cp313"]
-        include:
-          - os: ubuntu-latest
-            archs: x86_64
-          - os: ubuntu-24.04-arm
-            archs: aarch64
-          - os: windows-latest
-            archs: AMD64
-          - os: macos-14
-            archs: arm64
-          - os: macos-15-intel
-            archs: x86_64
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up build host Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Stamp package version
-        run: python scripts/set_package_version.py "${{ needs.version.outputs.version }}"
-
-      - name: Install cibuildwheel
-        run: python -m pip install "cibuildwheel>=3,<4"
-
-      - name: Build CPU wheels
-        run: python -m cibuildwheel --output-dir wheelhouse
-        env:
-          CIBW_ARCHS: ${{ matrix.archs }}
-          # Build only this job's Python version (overrides the pyproject build list).
-          CIBW_BUILD: ${{ matrix.python }}-*
-          # Reference backend only, matching the minimal portable wheel: no GPU
-          # backends, no MPI, and none of Ginkgo's tests/benchmarks/examples.
-          # py-build-cmake forwards cmake.args verbatim to the configure step
-          # (same override form the README documents for `pip install .`).
-          CIBW_CONFIG_SETTINGS: "override=cmake.args=[-DGINKGO_BUILD_MPI=OFF,-DGINKGO_BUILD_OMP=OFF,-DGINKGO_BUILD_CUDA=OFF,-DGINKGO_BUILD_HIP=OFF,-DGINKGO_BUILD_SYCL=OFF,-DGINKGO_BUILD_TESTS=OFF,-DGINKGO_BUILD_BENCHMARKS=OFF,-DGINKGO_BUILD_EXAMPLES=OFF]"
-
-      - name: Upload CPU wheel artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: cpu-wheels-${{ matrix.os }}-${{ matrix.archs }}-${{ matrix.python }}
-          path: wheelhouse/*.whl
-
-  build-gpu-wheels:
-    name: ${{ matrix.label }} wheels
-    needs: version
-    runs-on: ubuntu-latest
-    if: >
-      github.repository == 'Helmholtz-AI-Energy/pyGinkgo' &&
-      (startsWith(github.ref, 'refs/tags/v') ||
-      (github.event_name == 'workflow_dispatch' && inputs.build_wheels && inputs.build_gpu))
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - label: CUDA 12.8
-            suffix: cuda128
-            before_all: bash ci/install_cuda.sh 12.8
-            config_settings: "override=cmake.args=[-DGINKGO_BUILD_CUDA=ON,-DCMAKE_CUDA_ARCHITECTURES=80,-DGINKGO_BUILD_MPI=OFF,-DGINKGO_BUILD_OMP=OFF,-DGINKGO_BUILD_HIP=OFF,-DGINKGO_BUILD_SYCL=OFF,-DGINKGO_BUILD_TESTS=OFF,-DGINKGO_BUILD_BENCHMARKS=OFF,-DGINKGO_BUILD_EXAMPLES=OFF]"
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up build host Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Stamp GPU package version
-        run: python scripts/set_package_version.py "${{ needs.version.outputs.version }}+${{ matrix.suffix }}"
-
-      - name: Install cibuildwheel
-        run: python -m pip install "cibuildwheel>=3,<4"
-
-      - name: Build GPU wheels
-        run: python -m cibuildwheel --output-dir wheelhouse
-        env:
-          CIBW_BUILD: "cp312-manylinux_x86_64"
-          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_34
-          CIBW_BEFORE_ALL_LINUX: ${{ matrix.before_all }}
-          CIBW_CONFIG_SETTINGS: ${{ matrix.config_settings }}
-          # The NVIDIA driver library libcuda.so.1 is provided by the user's
-          # installed driver and must not be bundled into the wheel.
-          CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
-            LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
-            auditwheel -v repair --plat manylinux_2_34_x86_64 --exclude libcuda.so.1 -w {dest_dir} {wheel}
-          CIBW_ENVIRONMENT_LINUX: >
-            PATH=/usr/local/cuda/bin:$PATH
-            LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
-            CUDACXX=/usr/local/cuda/bin/nvcc
-            CUDAHOSTCXX=g++
-            CUDAToolkit_ROOT=/usr/local/cuda
-            PY_BUILD_CMAKE_VERBOSE=1
-          CIBW_BUILD_VERBOSITY: 1
-          # No GPU on the runner, so the installed-wheel smoke test cannot run.
-          CIBW_TEST_SKIP: "*"
-
-      - name: Upload GPU build failure logs
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gpu-build-logs-${{ matrix.suffix }}
-          path: |
-            .py-build-cmake_cache/**/CMake*.log
-            .py-build-cmake_cache/**/CMakeConfigureLog.yaml
-            .py-build-cmake_cache/**/*.log
-          if-no-files-found: ignore
-
-      - name: Upload GPU wheel artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: gpu-wheels-${{ matrix.suffix }}
-          path: wheelhouse/*.whl
+      github.repository == 'Helmholtz-AI-Energy/pyGinkgo' && inputs.build_wheels
+    uses: ./.github/workflows/wheels.yml
+    with:
+      build_cpu: ${{ inputs.build_cpu }}
+      build_gpu: ${{ inputs.build_gpu }}
+      # Manual runs always produce a nightly version, so a rehearsal can never
+      # occupy a version number intended for a real release.
+      release_tag: ""
 
   publish-cpu-pypi:
-    name: Publish CPU wheels to PyPI
-    needs: build-cpu-wheels
+    name: Publish CPU wheels
+    needs: build
     runs-on: ubuntu-latest
     if: >
       github.repository == 'Helmholtz-AI-Energy/pyGinkgo' &&
-      (startsWith(github.ref, 'refs/tags/v') ||
-      (github.event_name == 'workflow_dispatch' && inputs.publish_repository != 'none'))
+      inputs.build_wheels && inputs.build_cpu && inputs.publish_repository != 'none'
     environment:
       name: ${{ inputs.publish_repository == 'testpypi' && 'testpypi' || 'pypi' }}
       url: ${{ inputs.publish_repository == 'testpypi' && 'https://test.pypi.org/project/pyGinkgo/' || 'https://pypi.org/project/pyGinkgo/' }}
@@ -263,7 +112,7 @@ jobs:
     runs-on: ubuntu-latest
     if: >
       github.repository == 'Helmholtz-AI-Energy/pyGinkgo' &&
-      github.event_name == 'workflow_dispatch' && inputs.publish_existing_run_id != ''
+      inputs.publish_existing_run_id != ''
     environment:
       name: pypi
       url: https://pypi.org/project/pyGinkgo/
@@ -310,34 +159,12 @@ jobs:
         with:
           packages-dir: wheelhouse
 
-  publish-gpu-github-release:
-    name: Attach GPU wheels to GitHub Release
-    needs: build-gpu-wheels
-    runs-on: ubuntu-latest
-    if: >
-      github.repository == 'Helmholtz-AI-Energy/pyGinkgo' &&
-      startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: write
-    steps:
-      - name: Download GPU wheel artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: gpu-wheels-*
-          path: wheelhouse
-          merge-multiple: true
-
-      - name: Upload GPU wheels to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: wheelhouse/*.whl
-
   publish-existing-gpu-github-release:
     name: Attach existing GPU wheel artifacts to GitHub Release
     runs-on: ubuntu-latest
     if: >
       github.repository == 'Helmholtz-AI-Energy/pyGinkgo' &&
-      github.event_name == 'workflow_dispatch' && inputs.publish_existing_gpu_run_id != ''
+      inputs.publish_existing_gpu_run_id != ''
     permissions:
       contents: write
       actions: read

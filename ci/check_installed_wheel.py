@@ -23,20 +23,30 @@ import pyGinkgo.pyGinkgoBindings as pGB
 
 
 PROJECT_NAME = re.compile(r'(?m)^name = "([^"]+)"$')
+PROJECT_VERSION = re.compile(r'(?m)^version = "([^"]+)"$')
 
 
-def project_name() -> str:
+def project_field(pattern: re.Pattern[str], field: str) -> str:
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    match = PROJECT_NAME.search(pyproject.read_text(encoding="utf-8"))
+    match = pattern.search(pyproject.read_text(encoding="utf-8"))
     if not match:
-        raise SystemExit("Could not find project.name in pyproject.toml")
+        raise SystemExit(f"Could not find project.{field} in pyproject.toml")
     return match.group(1)
 
 
 def main() -> None:
-    dist_name = project_name()
+    dist_name = project_field(PROJECT_NAME, "name")
     dist_version = metadata.version(dist_name)
     print(f"Installed {dist_name} {dist_version}")
+
+    # Catches a wheel built before scripts/set_package_version.py stamped the
+    # version, which would otherwise be published as 0.0.0.
+    expected_version = project_field(PROJECT_VERSION, "version")
+    if dist_version != expected_version:
+        raise SystemExit(
+            f"Installed {dist_name} version ({dist_version}) does not match "
+            f"the version in pyproject.toml ({expected_version})"
+        )
 
     # The reference executor is always compiled in and must be constructible.
     executor = pGB.ReferenceExecutor()
