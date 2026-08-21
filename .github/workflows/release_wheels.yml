@@ -1,0 +1,76 @@
+name: Release wheels
+
+# Runs on every published GitHub Release: builds the full wheel set, publishes
+# the CPU wheels to PyPI and attaches the GPU wheels to the release.
+#
+# The publish job lives here rather than in the reusable wheels.yml because
+# PyPI trusted publishing cannot name a reusable workflow as the publisher, so
+# the PyPI publisher must be configured against `release_wheels.yml`.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.release.tag_name }}
+  # A release publish must never be cancelled halfway through.
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    if: github.repository == 'Helmholtz-AI-Energy/pyGinkgo'
+    uses: ./.github/workflows/wheels.yml
+    with:
+      build_cpu: true
+      build_gpu: true
+      release_tag: ${{ github.event.release.tag_name }}
+
+  publish-cpu-pypi:
+    name: Publish CPU wheels to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pyGinkgo/
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download CPU wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cpu-wheels-*
+          path: wheelhouse
+          merge-multiple: true
+
+      - name: List wheels selected for publishing
+        run: find wheelhouse -maxdepth 1 -type f -name "*.whl" -print -exec ls -lh {} \;
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: wheelhouse
+
+  attach-gpu-wheels:
+    name: Attach GPU wheels to the release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download GPU wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gpu-wheels-*
+          path: wheelhouse
+          merge-multiple: true
+
+      - name: Upload GPU wheels to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: wheelhouse/*.whl

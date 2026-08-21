@@ -1,0 +1,208 @@
+name: Python wheels
+
+# Manual wheel builds and rehearsal publishes. Releases are handled by
+# release_wheels.yml; this workflow never triggers on its own.
+#
+# The publish jobs live here rather than in the reusable wheels.yml because
+# PyPI trusted publishing cannot name a reusable workflow as the publisher, so
+# the TestPyPI publisher must be configured against `python_wheels.yml`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_wheels:
+        description: "Build wheels instead of publishing existing artifacts"
+        required: false
+        default: false
+        type: boolean
+      build_cpu:
+        description: "Build CPU wheels"
+        required: false
+        default: false
+        type: boolean
+      build_gpu:
+        description: "Build Linux GPU wheel variants (CUDA and ROCm)"
+        required: false
+        default: false
+        type: boolean
+      publish_repository:
+        description: "Publish freshly built CPU wheels to this index (use testpypi to rehearse a release)"
+        required: false
+        default: "none"
+        type: choice
+        options:
+          - none
+          - testpypi
+          - pypi
+      publish_existing_run_id:
+        description: "Publish CPU wheel artifacts from this existing run id instead of building"
+        required: false
+        default: ""
+        type: string
+      artifact_pattern:
+        description: "Artifact name pattern to publish when using publish_existing_run_id"
+        required: false
+        default: "cpu-wheels-*"
+        type: string
+      publish_existing_gpu_run_id:
+        description: "Attach GPU wheel artifacts from this existing run id to a GitHub Release"
+        required: false
+        default: ""
+        type: string
+      gpu_artifact_pattern:
+        description: "GPU artifact name pattern to attach when using publish_existing_gpu_run_id"
+        required: false
+        default: "gpu-wheels-*"
+        type: string
+      release_tag:
+        description: "GitHub Release tag for uploaded GPU wheels, for example v0.1.1"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build
+    if: >
+      github.repository == 'Helmholtz-AI-Energy/pyGinkgo' && inputs.build_wheels
+    uses: ./.github/workflows/wheels.yml
+    with:
+      build_cpu: ${{ inputs.build_cpu }}
+      build_gpu: ${{ inputs.build_gpu }}
+      # Manual runs always produce a nightly version, so a rehearsal can never
+      # occupy a version number intended for a real release.
+      release_tag: ""
+
+  publish-cpu-pypi:
+    name: Publish CPU wheels
+    needs: build
+    runs-on: ubuntu-latest
+    if: >
+      github.repository == 'Helmholtz-AI-Energy/pyGinkgo' &&
+      inputs.build_wheels && inputs.build_cpu && inputs.publish_repository != 'none'
+    environment:
+      name: ${{ inputs.publish_repository == 'testpypi' && 'testpypi' || 'pypi' }}
+      url: ${{ inputs.publish_repository == 'testpypi' && 'https://test.pypi.org/project/pyGinkgo/' || 'https://pypi.org/project/pyGinkgo/' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download CPU wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cpu-wheels-*
+          path: wheelhouse
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: wheelhouse
+          repository-url: ${{ inputs.publish_repository == 'testpypi' && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
+
+  publish-existing-cpu-pypi:
+    name: Publish existing CPU wheel artifacts to PyPI
+    runs-on: ubuntu-latest
+    if: >
+      github.repository == 'Helmholtz-AI-Energy/pyGinkgo' &&
+      inputs.publish_existing_run_id != ''
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pyGinkgo/
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - name: Validate selected run id
+        shell: bash
+        run: |
+          if [[ ! "${{ inputs.publish_existing_run_id }}" =~ ^[0-9]+$ ]]; then
+            echo "publish_existing_run_id must contain only the numeric run id."
+            exit 1
+          fi
+
+      - name: Download wheel artifacts from selected run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          rm -rf wheelhouse
+          mkdir -p wheelhouse
+          gh run download "${{ inputs.publish_existing_run_id }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "${{ inputs.artifact_pattern }}" \
+            --dir wheelhouse
+
+          find wheelhouse -mindepth 2 -type f -name "*.whl" -exec mv -t wheelhouse {} +
+          find wheelhouse -type d -empty -delete
+
+          if ! find wheelhouse -maxdepth 1 -type f -name "*.whl" -print -quit | grep -q .; then
+            echo "No wheel files were downloaded."
+            echo "Run id: ${{ inputs.publish_existing_run_id }}"
+            echo "Artifact pattern: ${{ inputs.artifact_pattern }}"
+            exit 1
+          fi
+
+      - name: List wheels selected for publishing
+        run: find wheelhouse -maxdepth 1 -type f -name "*.whl" -print -exec ls -lh {} \;
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: wheelhouse
+
+  publish-existing-gpu-github-release:
+    name: Attach existing GPU wheel artifacts to GitHub Release
+    runs-on: ubuntu-latest
+    if: >
+      github.repository == 'Helmholtz-AI-Energy/pyGinkgo' &&
+      inputs.publish_existing_gpu_run_id != ''
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Validate selected run id and release tag
+        shell: bash
+        run: |
+          if [[ ! "${{ inputs.publish_existing_gpu_run_id }}" =~ ^[0-9]+$ ]]; then
+            echo "publish_existing_gpu_run_id must contain only the numeric run id."
+            exit 1
+          fi
+          if [[ -z "${{ inputs.release_tag }}" ]]; then
+            echo "release_tag is required when publishing GPU wheels to a GitHub Release."
+            exit 1
+          fi
+
+      - name: Download GPU wheel artifacts from selected run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          rm -rf wheelhouse
+          mkdir -p wheelhouse
+          gh run download "${{ inputs.publish_existing_gpu_run_id }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "${{ inputs.gpu_artifact_pattern }}" \
+            --dir wheelhouse
+
+          find wheelhouse -mindepth 2 -type f -name "*.whl" -exec mv -t wheelhouse {} +
+          find wheelhouse -type d -empty -delete
+
+          if ! find wheelhouse -maxdepth 1 -type f -name "*.whl" -print -quit | grep -q .; then
+            echo "No GPU wheel files were downloaded."
+            exit 1
+          fi
+
+      - name: Upload GPU wheels to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          files: wheelhouse/*.whl
