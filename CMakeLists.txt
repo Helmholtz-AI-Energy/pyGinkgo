@@ -16,6 +16,18 @@ set(PYTHON_EXECUTABLE ${Python_EXECUTABLE})
 # copy all generated files to pyGinkgo that makes testing and installing easier
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${PROJECT_NAME})
 
+# Multi-config generators (Visual Studio) append the configuration name to the
+# output directory, which would put the extension module in pyGinkgo/Release/
+# instead of next to the Python sources. It would then be packaged one level too
+# deep and fail to import as pyGinkgo.pyGinkgoBindings. Pin every configuration
+# to the same directory. CMAKE_CONFIGURATION_TYPES is empty for single-config
+# generators, so this is a no-op there.
+foreach(config IN LISTS CMAKE_CONFIGURATION_TYPES)
+  string(TOUPPER "${config}" config_upper)
+  set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${config_upper}
+      ${CMAKE_BINARY_DIR}/${PROJECT_NAME})
+endforeach()
+
 # Find OpenMPI find_package(MPI REQUIRED)
 
 # Find pybind11
@@ -179,11 +191,29 @@ add_subdirectory(tests/pyGinkgo)
 if(APPLE)
   set(CMAKE_MACOSX_RPATH 1)
 endif()
-set(CMAKE_INSTALL_RPATH ${Python_SITELIB}/${PROJECT_NAME})
+# The extension module and the Ginkgo shared libraries are installed next to
+# each other, so a relative RPATH keeps the result relocatable. An absolute
+# RPATH into the build environment would not survive wheel packaging.
+if(APPLE)
+  set(CMAKE_INSTALL_RPATH "@loader_path")
+else()
+  set(CMAKE_INSTALL_RPATH "$ORIGIN")
+endif()
 
-message(STATUS "Install path: ${Python_SITELIB}")
-install(DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
-        DESTINATION ${Python_SITELIB})
+# Install destinations must stay RELATIVE. CMake ignores CMAKE_INSTALL_PREFIX
+# whenever a DESTINATION is absolute, and py-build-cmake relies on that prefix
+# to redirect the install into the wheel staging directory -- an absolute
+# ${Python_SITELIB} destination silently installs into the isolated build
+# environment instead, producing a wheel with no binaries in it. Defaulting the
+# prefix to site-packages keeps a plain `cmake --install .` behaving as before.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX
+      "${Python_SITELIB}"
+      CACHE PATH "Where the pyGinkgo package is installed" FORCE)
+endif()
+
+message(STATUS "Install path: ${CMAKE_INSTALL_PREFIX}")
+install(DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY} DESTINATION ".")
 install(
   IMPORTED_RUNTIME_ARTIFACTS
   ginkgo
@@ -194,4 +224,13 @@ install(
   ginkgo_dpcpp
   ginkgo_reference
   DESTINATION
-  ${Python_SITELIB}/${PROJECT_NAME})
+  ${PROJECT_NAME})
+
+# On MSVC/MINGW shared builds Ginkgo splits its core out into a separate
+# ginkgo_core library to work around the LNK1189 exported-symbol limit; see
+# `set(ginkgo_core ...)` in ginkgo's core/CMakeLists.txt. Everywhere else
+# ginkgo_core *is* ginkgo, so the target only exists on Windows -- where
+# ginkgo.dll imports it and the package is unimportable without it.
+if(TARGET ginkgo_core)
+  install(IMPORTED_RUNTIME_ARTIFACTS ginkgo_core DESTINATION ${PROJECT_NAME})
+endif()

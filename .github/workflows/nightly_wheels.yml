@@ -1,0 +1,98 @@
+name: Nightly wheels
+
+# Builds the full wheel set -- CPU and GPU -- once a day, but only when main
+# has actually moved since the last successful nightly. An unchanged tip would
+# otherwise rebuild byte-identical wheels across every job each night, and the
+# GPU variants take over an hour apiece.
+
+on:
+  schedule:
+    # 03:17 UTC. Deliberately off the hour: scheduled runs on the hour are
+    # heavily oversubscribed on GitHub's shared runners and get delayed.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build even if main has not changed since the last nightly"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  # A nightly still running when the next one fires should finish rather than
+  # be killed halfway through.
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Has main changed?
+    runs-on: ubuntu-latest
+    if: github.repository == 'Helmholtz-AI-Energy/pyGinkgo'
+    permissions:
+      contents: read
+      # Required to read this workflow's own previous runs.
+      actions: read
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - name: Compare main against the last successful nightly
+        id: check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          # Scheduled runs always use the default branch, so GITHUB_SHA is the
+          # tip of main.
+          current="${GITHUB_SHA}"
+
+          # The most recent nightly that finished successfully -- including one
+          # that decided to skip, since that still means this SHA was accounted
+          # for. A failed nightly is not counted, so a failure retries the same
+          # commit the following night.
+          last="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/nightly_wheels.yml/runs?status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // ""' 2>/dev/null || true)"
+
+          if [[ "${FORCE}" == "true" ]]; then
+            echo "Forced via workflow_dispatch; building ${current}."
+            changed=true
+          elif [[ -z "${last}" ]]; then
+            echo "No previous successful nightly found; building ${current}."
+            changed=true
+          elif [[ "${last}" == "${current}" ]]; then
+            echo "main is unchanged at ${current}; nothing to build."
+            changed=false
+          else
+            echo "main moved ${last} -> ${current}; building."
+            changed=true
+          fi
+
+          echo "changed=${changed}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "### Nightly wheels"
+            echo ""
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| tip of main | \`${current}\` |"
+            echo "| last nightly | \`${last:-none}\` |"
+            echo "| building | ${changed} |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  build:
+    name: Build
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    uses: ./.github/workflows/wheels.yml
+    with:
+      build_cpu: true
+      # The full set, GPU variants included: this only fires when main has
+      # actually moved, so the cost is per-change rather than per-night.
+      build_gpu: true
+      # Empty tag means scripts/set_package_version.py produces a nightly
+      # version rather than a stable one.
+      release_tag: ""

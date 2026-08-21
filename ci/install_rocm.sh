@@ -84,3 +84,28 @@ fi
 
 ln -sfn "${rocm_root}" /opt/rocm
 "/opt/rocm/bin/hipconfig" --version
+
+# ROCm's bundled clang only probes the standard prefixes when looking for a GCC
+# installation, but the manylinux image keeps its GCC in a gcc-toolset prefix
+# (see DEVTOOLSET_ROOTPATH in pypa/manylinux's Dockerfile) and merely puts it on
+# PATH -- so clang finds no libstdc++ and the HIP compiler check fails with
+# "'cmath' file not found". Expose the toolchain at a fixed path so the build can
+# pass --gcc-toolchain=/opt/manylinux-gcc without hard-coding a GCC version.
+gcc_root=""
+shopt -s nullglob
+for candidate in /opt/rh/gcc-toolset-*/root/usr; do
+    [[ -d "${candidate}/include/c++" ]] && gcc_root="${candidate}"
+done
+shopt -u nullglob
+
+if [[ -z "${gcc_root}" ]]; then
+    echo "Could not find a GCC toolset providing C++ headers." >&2
+    echo "c++ resolves to: $(command -v c++ 2>/dev/null || echo none)" >&2
+    echo "  -> $(readlink -f "$(command -v c++)" 2>/dev/null || echo none)" >&2
+    echo "Candidates under /opt/rh:" >&2
+    ls -d /opt/rh/* 2>/dev/null >&2 || echo "  (none)" >&2
+    exit 1
+fi
+
+ln -sfn "${gcc_root}" /opt/manylinux-gcc
+echo "Using GCC toolchain at ${gcc_root}"

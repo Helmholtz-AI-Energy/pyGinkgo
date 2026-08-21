@@ -144,12 +144,23 @@ jobs:
             suffix: cuda128
             before_all: bash ci/install_cuda.sh 12.8
             config_settings: "override=cmake.args=[-DGINKGO_BUILD_CUDA=ON,-DCMAKE_CUDA_ARCHITECTURES=80;90,-DGINKGO_BUILD_MPI=OFF,-DGINKGO_BUILD_OMP=OFF,-DGINKGO_BUILD_HIP=OFF,-DGINKGO_BUILD_SYCL=OFF,-DGINKGO_BUILD_TESTS=OFF,-DGINKGO_BUILD_BENCHMARKS=OFF,-DGINKGO_BUILD_EXAMPLES=OFF]"
-            # The NVIDIA driver library libcuda.so.1 is provided by the user's
-            # installed driver and must not be bundled into the wheel. The CUDA
-            # runtime libraries are small enough to ship inside it.
+            # libcuda.so.1 comes from the user's NVIDIA driver and must never be
+            # bundled. The CUDA math libraries are excluded as well: Ginkgo links
+            # cublas, cusparse, curand and cufft, and bundling them produced a
+            # 1.995 GiB wheel -- 5 MiB under GitHub's 2 GiB release asset limit,
+            # which the next Ginkgo or CUDA update would have broken. The wheel
+            # therefore needs a CUDA 12.x installation on the host, the same way
+            # the ROCm variant needs a host ROCm. libcudart stays in the wheel:
+            # it is small, and keeping it matched to the build avoids a runtime
+            # version mismatch.
             repair_command: >
               LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
-              auditwheel -v repair --plat manylinux_2_34_x86_64 --exclude libcuda.so.1 -w {dest_dir} {wheel}
+              auditwheel -v repair --plat manylinux_2_34_x86_64
+              --exclude libcuda.so.1
+              --exclude 'libcublas.so*' --exclude 'libcublasLt.so*'
+              --exclude 'libcusparse.so*' --exclude 'libcurand.so*'
+              --exclude 'libcufft.so*' --exclude 'libnvJitLink.so*'
+              -w {dest_dir} {wheel}
             environment: >
               PATH=/usr/local/cuda/bin:$PATH
               LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
@@ -157,13 +168,23 @@ jobs:
               CUDAHOSTCXX=g++
               CUDAToolkit_ROOT=/usr/local/cuda
               PY_BUILD_CMAKE_VERBOSE=1
-          - label: CUDA 13.3
-            suffix: cuda133
-            before_all: bash ci/install_cuda.sh 13.3
+          # CUDA 13 needs its own variant because minor-version compatibility
+          # does not span major versions. 13.3 does not build: Ginkgo's batch
+          # solver headers fail under nvcc 13.3 with GCC 14 as host compiler
+          # ("need 'typename' before decltype" in GKO_DEFERRED_FACTORY_PARAMETER),
+          # so this tries the older 13.1 instead. Otherwise identical to 12.8.
+          - label: CUDA 13.1
+            suffix: cuda131
+            before_all: bash ci/install_cuda.sh 13.1
             config_settings: "override=cmake.args=[-DGINKGO_BUILD_CUDA=ON,-DCMAKE_CUDA_ARCHITECTURES=80;90,-DGINKGO_BUILD_MPI=OFF,-DGINKGO_BUILD_OMP=OFF,-DGINKGO_BUILD_HIP=OFF,-DGINKGO_BUILD_SYCL=OFF,-DGINKGO_BUILD_TESTS=OFF,-DGINKGO_BUILD_BENCHMARKS=OFF,-DGINKGO_BUILD_EXAMPLES=OFF]"
             repair_command: >
               LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
-              auditwheel -v repair --plat manylinux_2_34_x86_64 --exclude libcuda.so.1 -w {dest_dir} {wheel}
+              auditwheel -v repair --plat manylinux_2_34_x86_64
+              --exclude libcuda.so.1
+              --exclude 'libcublas.so*' --exclude 'libcublasLt.so*'
+              --exclude 'libcusparse.so*' --exclude 'libcurand.so*'
+              --exclude 'libcufft.so*' --exclude 'libnvJitLink.so*'
+              -w {dest_dir} {wheel}
             environment: >
               PATH=/usr/local/cuda/bin:$PATH
               LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
@@ -174,11 +195,44 @@ jobs:
           - label: ROCm 6.4
             suffix: rocm64
             before_all: bash ci/install_rocm.sh 6.4
-            config_settings: "override=cmake.args=[-DGINKGO_BUILD_HIP=ON,-DCMAKE_HIP_ARCHITECTURES=gfx90a,-DGINKGO_BUILD_CUDA=OFF,-DGINKGO_BUILD_MPI=OFF,-DGINKGO_BUILD_OMP=OFF,-DGINKGO_BUILD_SYCL=OFF,-DGINKGO_BUILD_TESTS=OFF,-DGINKGO_BUILD_BENCHMARKS=OFF,-DGINKGO_BUILD_EXAMPLES=OFF]"
+            # --gcc-toolchain is required: ROCm's bundled clang only probes the
+            # standard prefixes for a GCC installation, while manylinux keeps its
+            # GCC in a gcc-toolset prefix, so the HIP compiler check otherwise
+            # fails with "'cmath' file not found". /opt/manylinux-gcc is the
+            # symlink install_rocm.sh points at whichever toolset is present.
+            config_settings: "override=cmake.args=[-DGINKGO_BUILD_HIP=ON,-DCMAKE_HIP_ARCHITECTURES=gfx90a,-DCMAKE_HIP_FLAGS=--gcc-toolchain=/opt/manylinux-gcc,-DGINKGO_BUILD_CUDA=OFF,-DGINKGO_BUILD_MPI=OFF,-DGINKGO_BUILD_OMP=OFF,-DGINKGO_BUILD_SYCL=OFF,-DGINKGO_BUILD_TESTS=OFF,-DGINKGO_BUILD_BENCHMARKS=OFF,-DGINKGO_BUILD_EXAMPLES=OFF]"
             # Unlike CUDA, the ROCm userspace stack is far too large to bundle
             # (rocBLAS alone ships multi-hundred-MB Tensile kernel archives), so
             # it is excluded wholesale and has to be present on the host at
             # import time -- typically via a `module load rocm` on HPC systems.
+            repair_command: >
+              LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH:-}"
+              auditwheel -v repair --plat manylinux_2_34_x86_64
+              --exclude 'libamdhip64.so*' --exclude 'libhsa-runtime64.so*'
+              --exclude 'libhsakmt.so*' --exclude 'libamd_comgr.so*'
+              --exclude 'libhiprtc.so*'
+              --exclude 'librocblas.so*' --exclude 'libhipblas.so*'
+              --exclude 'librocsparse.so*' --exclude 'libhipsparse.so*'
+              --exclude 'librocrand.so*' --exclude 'libhiprand.so*'
+              --exclude 'libroctx64.so*'
+              -w {dest_dir} {wheel}
+            environment: >
+              ROCM_PATH=/opt/rocm
+              PATH=/opt/rocm/bin:$PATH
+              LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH
+              CMAKE_PREFIX_PATH=/opt/rocm
+              HIP_PLATFORM=amd
+              PY_BUILD_CMAKE_VERBOSE=1
+          # ROCm 7 needs its own variant: the ROCm libraries are excluded from
+          # the wheel, so it links against the host's sonames and those carry
+          # the major version. 7.0 specifically, because AMD's rhel9 repository
+          # serves el8-built packages for 7.1 and 7.2, which do not belong in an
+          # AlmaLinux 9 manylinux image -- and 7.0 also sits below the HIP 7.1
+          # thrust-namespace issue Ginkgo works around.
+          - label: ROCm 7.0
+            suffix: rocm70
+            before_all: bash ci/install_rocm.sh 7.0
+            config_settings: "override=cmake.args=[-DGINKGO_BUILD_HIP=ON,-DCMAKE_HIP_ARCHITECTURES=gfx90a,-DCMAKE_HIP_FLAGS=--gcc-toolchain=/opt/manylinux-gcc,-DGINKGO_BUILD_CUDA=OFF,-DGINKGO_BUILD_MPI=OFF,-DGINKGO_BUILD_OMP=OFF,-DGINKGO_BUILD_SYCL=OFF,-DGINKGO_BUILD_TESTS=OFF,-DGINKGO_BUILD_BENCHMARKS=OFF,-DGINKGO_BUILD_EXAMPLES=OFF]"
             repair_command: >
               LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH:-}"
               auditwheel -v repair --plat manylinux_2_34_x86_64
