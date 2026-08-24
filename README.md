@@ -52,22 +52,21 @@ as `+cuda128`, and PyPI rejects local version identifiers. They are attached to
 the matching [GitHub Release](https://github.com/Helmholtz-AI-Energy/pyGinkgo/releases)
 instead, and are installed directly by URL:
 
-Two CUDA variants are built, one per CUDA major version. Pick the one matching
-the CUDA installation your driver supports — a 12.x wheel will not run against a
-CUDA 13 installation or the reverse, because minor-version compatibility does
-not span major versions:
+Two variants are built, one per CUDA major version. Pick the one matching your
+CUDA installation — minor-version compatibility spans a major line but not
+across one, so a 12.x wheel will not run against CUDA 13 or the reverse:
 
-| Variant | Suffix | NVIDIA driver |
-| --- | --- | --- |
-| CUDA 12.8 | `+cuda128` | R525+ (CUDA 12 minor-version compatibility) |
-| CUDA 13.3 | `+cuda133` | R580+ |
+| Variant | Suffix | Works with | NVIDIA driver |
+| --- | --- | --- | --- |
+| CUDA 12.8 | `+cuda128` | any CUDA 12.x | R525+ |
+| CUDA 13.1 | `+cuda131` | any CUDA 13.x | R580+ |
 
 ```bash
 # CUDA 12.8, CPython 3.12, Linux x86-64
 pip install https://github.com/Helmholtz-AI-Energy/pyGinkgo/releases/download/v0.0.1/pyGinkgo-0.0.1+cuda128-cp312-cp312-manylinux_2_34_x86_64.whl
 
-# CUDA 13.3, same platform
-pip install https://github.com/Helmholtz-AI-Energy/pyGinkgo/releases/download/v0.0.1/pyGinkgo-0.0.1+cuda133-cp312-cp312-manylinux_2_34_x86_64.whl
+# CUDA 13.1, same platform
+pip install https://github.com/Helmholtz-AI-Energy/pyGinkgo/releases/download/v0.0.1/pyGinkgo-0.0.1+cuda131-cp312-cp312-manylinux_2_34_x86_64.whl
 ```
 
 Both variants are otherwise identical, and narrower than the CPU wheels:
@@ -77,33 +76,58 @@ Both variants are otherwise identical, and narrower than the CPU wheels:
 | OS | Linux x86-64, glibc >= 2.34 (Ubuntu 22.04+, RHEL/Rocky 9+, Debian 12+) |
 | Python | CPython 3.12 only |
 | GPU | compute capability 8.0 (Ampere, e.g. A100/A30) and 9.0 (Hopper, e.g. H100) |
-| CUDA toolkit | not required at runtime — the CUDA runtime libraries are bundled |
+| CUDA math libraries | **required on the host**, matching the variant's major version |
 
-Only `libcuda.so.1` is deliberately excluded from the wheel, since it is provided
-by the installed NVIDIA driver. Both variants also embed PTX, so newer GPU
-architectures should work through JIT compilation, but this is not tested.
+The CUDA math libraries are *not* bundled: Ginkgo links cuBLAS, cuSPARSE, cuRAND
+and cuFFT, and shipping them produced a 2 GB wheel. The wheel links against the
+host's CUDA installation instead, so a matching toolkit must be installed and on
+the loader path — on HPC systems this usually means loading the matching module
+before importing pyGinkgo:
+
+```bash
+module load cuda/12          # or: export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+```
+
+`libcuda.so.1` is excluded too, since it is provided by the installed NVIDIA
+driver, while `libcudart` *is* bundled so the CUDA runtime stays matched to the
+build. The wheel also embeds PTX, so newer GPU architectures should work through
+JIT compilation, but this is not tested.
 
 #### ROCm wheels (from GitHub Releases)
 
-ROCm wheels are published alongside the CUDA ones, with a `+rocm64` suffix:
+ROCm wheels are published alongside the CUDA ones. As with CUDA, there is one
+variant per major version — the ROCm libraries are not bundled, so the wheel
+links against the host's sonames and those carry the major version. A ROCm 6
+wheel will not load against a ROCm 7 installation:
+
+| Variant | Suffix | Works with |
+| --- | --- | --- |
+| ROCm 6.4 | `+rocm64` | any ROCm 6.x |
+| ROCm 7.0 | `+rocm70` | any ROCm 7.x |
 
 ```bash
 # ROCm 6.4, CPython 3.12, Linux x86-64, AMD CDNA2 (gfx90a)
 pip install https://github.com/Helmholtz-AI-Energy/pyGinkgo/releases/download/v0.0.1/pyGinkgo-0.0.1+rocm64-cp312-cp312-manylinux_2_34_x86_64.whl
+
+# ROCm 7.0, same platform
+pip install https://github.com/Helmholtz-AI-Energy/pyGinkgo/releases/download/v0.0.1/pyGinkgo-0.0.1+rocm70-cp312-cp312-manylinux_2_34_x86_64.whl
 ```
+
+Both variants are otherwise identical:
 
 | Requirement | Value |
 | --- | --- |
 | OS | Linux x86-64, glibc >= 2.34 (Ubuntu 22.04+, RHEL/Rocky 9+, Debian 12+) |
 | Python | CPython 3.12 only |
 | GPU | gfx90a (CDNA2, e.g. MI210/MI250X) |
-| ROCm runtime | **required on the host**, 6.4.x |
+| ROCm runtime | **required on the host**, matching the variant's major version |
 
-Note the difference from the CUDA wheel: the ROCm userspace libraries are *not*
-bundled, because rocBLAS alone ships hundreds of megabytes of Tensile kernels.
-The wheel links against the host's ROCm installation, so ROCm 6.4 must be
-installed and on the loader path — on HPC systems this usually means loading the
-matching module before importing pyGinkgo:
+Note the difference from the CUDA wheels: *all* the ROCm userspace libraries are
+excluded, not just the math ones, because rocBLAS alone ships hundreds of
+megabytes of Tensile kernels. The wheel links against the host's ROCm
+installation, so a matching ROCm must be installed and on the loader path — on
+HPC systems this usually means loading the matching module before importing
+pyGinkgo:
 
 ```bash
 module load rocm/6.4          # or: export LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH
