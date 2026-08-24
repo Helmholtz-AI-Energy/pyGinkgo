@@ -85,7 +85,7 @@ def _normalize_torch_dtype(dtype, allowed_types):
     return None
 
 
-def _normalize_dtype(dtype, allowed_types, name):
+def _normalize_dtype(dtype, allowed_types):
     if dtype is None:
         return None
 
@@ -104,14 +104,14 @@ def _normalize_dtype(dtype, allowed_types, name):
         return numpy_dtype
 
     raise ValueError(
-        f"Not a valid {name}: {dtype}. "
+        f"Cannot find dtype {dtype}. "
         f"Possible choices are: {_dtype_choices(allowed_types)}"
     )
 
 
 def _try_normalize_dtype(dtype, allowed_types):
     try:
-        return _normalize_dtype(dtype, allowed_types, "dtype")
+        return _normalize_dtype(dtype, allowed_types)
     except ValueError:
         return None
 
@@ -124,15 +124,15 @@ def _try_infer_dtype(obj, allowed_types):
     
 
 def _normalize_value_dtype(dtype):
-    return _normalize_dtype(dtype, gko_types.ValueType, "dtype")
+    return _normalize_dtype(dtype, gko_types.ValueType)
 
 
 def _normalize_array_dtype(dtype):
-    return _normalize_dtype(dtype, gko_types.dtype, "dtype")
+    return _normalize_dtype(dtype, gko_types.dtype)
 
 
 def _normalize_index_dtype(dtype):
-    return _normalize_dtype(dtype, gko_types.IndexType, "itype")
+    return _normalize_dtype(dtype, gko_types.IndexType)
 
 
 def _dtype_from_binding_name(obj, allowed_types):
