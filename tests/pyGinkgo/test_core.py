@@ -115,6 +115,66 @@ class TestCore:
                 device=self.executor,
             )
 
+    def test_read_rejects_missing_file(self, tmp_path):
+        # Without an explicit check the missing file reaches Ginkgo, which
+        # reports it as "error when reading the header line" from the Matrix
+        # Market parser -- see issue #120.
+        with pytest.raises(FileNotFoundError, match="Cannot read matrix file"):
+            pg.read(
+                str(tmp_path / "does_not_exist.mtx"),
+                format="Coo",
+                dtype=self.data_type,
+                itype="int32",
+                device=self.executor,
+            )
+
+    def test_read_reports_the_relative_path_it_was_given(self, tmp_path, monkeypatch):
+        # A bare relative path resolving somewhere unexpected is what made
+        # issue #120 confusing, so the message has to name both the path that
+        # was passed and the absolute path it resolved to.
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(
+            FileNotFoundError, match=r"resolved from 'does_not_exist\.mtx'"
+        ):
+            pg.read(
+                "does_not_exist.mtx",
+                format="Coo",
+                dtype=self.data_type,
+                itype="int32",
+                device=self.executor,
+            )
+
+    def test_read_rejects_a_directory(self, tmp_path):
+        with pytest.raises(IsADirectoryError, match="Cannot read matrix file"):
+            pg.read(
+                str(tmp_path),
+                format="Coo",
+                dtype=self.data_type,
+                itype="int32",
+                device=self.executor,
+            )
+
+    @pytest.mark.skipif(
+        os.name != "posix" or os.geteuid() == 0,
+        reason="needs POSIX file permissions and a non-root user",
+    )
+    def test_read_rejects_unreadable_file(self, tmp_path):
+        unreadable = tmp_path / "unreadable.mtx"
+        unreadable.write_text("%%MatrixMarket matrix coordinate real general\n")
+        unreadable.chmod(0o000)
+        try:
+            with pytest.raises(PermissionError, match="Cannot read matrix file"):
+                pg.read(
+                    str(unreadable),
+                    format="Coo",
+                    dtype=self.data_type,
+                    itype="int32",
+                    device=self.executor,
+                )
+        finally:
+            # Leave it removable by tmp_path cleanup.
+            unreadable.chmod(0o644)
+
     def test_generate_solver_can_apply_solver(self):
         solver_args = {
             "type": "solver::Cg",

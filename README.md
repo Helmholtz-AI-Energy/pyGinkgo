@@ -256,7 +256,15 @@ This will generate the stubs for the C++ code in the `pyGinkgoBindings` module i
 
 ## Usage
 
-Usage examples can be found in [examples](examples) directory. Here's a simple example demonstrating how to use pyGinkgo to perform sparse matrix-vector multiplication:
+Usage examples can be found in [examples](examples) directory. Here's a simple example demonstrating how to use pyGinkgo to perform sparse matrix-vector multiplication.
+
+It reads a matrix in [Matrix Market](https://math.nist.gov/MatrixMarket/formats.html)
+format. The example below uses `m1.mtx` from this repository — if you installed
+pyGinkgo from PyPI you will not have it locally, so fetch it first:
+
+```bash
+curl -LO https://raw.githubusercontent.com/Helmholtz-AI-Energy/pyGinkgo/main/examples/m1.mtx
+```
 
 ```python
 import pyGinkgo as pg
@@ -265,7 +273,8 @@ import numpy as np
 # Device initialization
 dev = pg.device("cuda")
 
-# Initialize matrix and tensors
+# Initialize matrix and tensors. The path is relative to the working
+# directory, so run this from wherever m1.mtx actually is.
 fn = 'm1.mtx'
 
 A = pg.read(device=dev, path=fn, dtype="double", format="Csr")
