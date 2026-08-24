@@ -93,7 +93,24 @@ def read(
 
     # Processing filepath
     filepath = os.path.abspath(path)
-    
+
+    # Ginkgo is handed a std::ifstream that it does not check for open failure,
+    # so any problem opening the file surfaces as a confusing
+    # "error when reading the header line" from the Matrix Market parser.
+    # Probe it here instead. Opening is exactly what Ginkgo goes on to do, and
+    # it reports the real reason -- missing, unreadable, a directory -- where
+    # os.path.isfile() collapses all of them (and a stat() denied by an
+    # unsearchable parent directory) into a single False.
+    try:
+        with open(filepath, "rb"):
+            pass
+    except OSError as error:
+        raise type(error)(
+            f"Cannot read matrix file {filepath!r}" +
+            ("" if os.path.isabs(path) else f" (resolved from {path!r})") +
+            f": {error.strerror}"
+        ) from error
+
     executor = pg.device(device)
 
     # Checking if the format is valid
