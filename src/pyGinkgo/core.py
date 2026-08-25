@@ -23,23 +23,21 @@ except ImportError:
 # TODO: add tests for the functions in this file
 
 _STRING_DTYPE_ALIASES = {
-    "half": "half",
-    "float16": "half",
-    "float": "float",
-    "float32": "float",
-    "single": "float",
-    "double": "double",
-    "float64": "double",
-    "int32": "int32",
-    "int64": "int64",
-    "longlong": "int64",
+    "half": gko_types.ValueType.half,
+    "float16": gko_types.ValueType.half,
+    "float": gko_types.ValueType.float,
+    "float32": gko_types.ValueType.float,
+    "single": gko_types.ValueType.float,
+    "double": gko_types.ValueType.double,
+    "float64": gko_types.ValueType.double,
+    "int32": gko_types.IndexType.int32,
+    "int64": gko_types.IndexType.int64,
+    "longlong": gko_types.IndexType.int64,
 }
 
 
 def _dtype_values(allowed_types):
-    if hasattr(allowed_types, "values"):
-        return allowed_types.values()
-    return [str(dtype) for dtype in allowed_types]
+    return [dtype.value for dtype in list(allowed_types)]
 
 
 def _dtype_choices(allowed_types):
@@ -47,12 +45,15 @@ def _dtype_choices(allowed_types):
 
 
 def _numpy_to_gko_map(allowed_types):
-    values = set(_dtype_values(allowed_types))
+    allowed = set(allowed_types)
     mapping = {}
-    if values.intersection(gko_types.ValueType.values()):
+
+    if allowed.intersection(gko_types.ValueType):
         mapping.update(gko_types.NUMPY_TO_GKO_VALUE)
-    if values.intersection(gko_types.IndexType.values()):
+
+    if allowed.intersection(gko_types.IndexType):
         mapping.update(gko_types.NUMPY_TO_GKO_INDEX)
+
     return mapping
 
 
@@ -62,9 +63,11 @@ def _normalize_numpy_dtype(dtype, allowed_types):
     except (TypeError, ValueError):
         return None
 
-    dtype_name = _numpy_to_gko_map(allowed_types).get(np_dtype.type)
-    if dtype_name in _dtype_values(allowed_types):
-        return dtype_name
+    gko_dtype = _numpy_to_gko_map(allowed_types).get(np_dtype.type)
+
+    if gko_dtype in allowed_types:
+        return gko_dtype
+    
     return None
 
 
@@ -73,15 +76,17 @@ def _normalize_torch_dtype(dtype, allowed_types):
         return None
 
     torch_map = {
-        torch.float16: "half",
-        torch.float32: "float",
-        torch.float64: "double",
-        torch.int32: "int32",
-        torch.int64: "int64",
+        torch.float16: gko_types.ValueType.half,
+        torch.float32: gko_types.ValueType.float,
+        torch.float64: gko_types.ValueType.double,
+        torch.int32: gko_types.IndexType.int32,
+        torch.int64: gko_types.IndexType.int64,
     }
-    dtype_name = torch_map.get(dtype)
-    if dtype_name in _dtype_values(allowed_types):
-        return dtype_name
+    gko_dtype = torch_map.get(dtype)
+
+    if gko_dtype in allowed_types:
+        return gko_dtype
+
     return None
 
 
@@ -89,16 +94,25 @@ def _normalize_dtype(dtype, allowed_types):
     if dtype is None:
         return None
 
-    dtype_values = _dtype_values(allowed_types)
+    allowed = set(allowed_types)
+
+    # Already a Ginkgo dtype enum
+    if isinstance(dtype, gko_types.NpDatatypeEnum):
+        if dtype in allowed:
+            return dtype
+
+    # Direct PyTorch -> Ginkgo mapping
     torch_dtype = _normalize_torch_dtype(dtype, allowed_types)
     if torch_dtype is not None:
         return torch_dtype
 
     if isinstance(dtype, str):
-        dtype_name = _STRING_DTYPE_ALIASES.get(dtype.lower(), dtype)
-        if dtype_name in dtype_values:
-            return dtype_name
+        gko_dtype = _STRING_DTYPE_ALIASES.get(dtype.lower())
 
+        if gko_dtype in allowed:
+            return gko_dtype
+
+    # Direct NumPy -> Ginkgo mapping
     numpy_dtype = _normalize_numpy_dtype(dtype, allowed_types)
     if numpy_dtype is not None:
         return numpy_dtype
@@ -129,10 +143,7 @@ def _dtype_from_binding_name(obj, allowed_types):
     if len(parts) < 2:
         return None
 
-    dtype_name = parts[1]
-    if dtype_name in _dtype_values(allowed_types):
-        return dtype_name
-    return None
+    return _try_normalize_dtype(parts[1], allowed_types)
 
 
 def _dtype_from_array_protocol(obj, allowed_types):
@@ -246,9 +257,11 @@ def _infer_sparse_index_dtype(matrix_format, obj, cols, rows, itype):
         )
 
     if len(set(inferred)) > 1:
+        found = sorted(dtype.value for dtype in set(inferred))
+
         raise ValueError(
             f"Cannot infer a single itype for {matrix_format} index input. "
-            f"Found: {', '.join(sorted(set(inferred)))}. "
+            f"Found: {', '.join(found)}. "
             "Please specify itype."
         )
 
@@ -357,7 +370,7 @@ def array(obj, device: gko_types.DeviceType = "cpu", dtype=None):
         else _normalize_dtype(dtype, gko_types.dtype)
     )
     executor = pg.device(device)
-    array_cls = getattr(pGB.base, "array_" + dtype)
+    array_cls = getattr(pGB.base, f"array_{dtype.value}")
     return array_cls(executor, obj)
 
 
@@ -386,7 +399,7 @@ def dense(
         obj = np.asarray(obj)
 
     executor = pg.device(device)
-    dense_cls = getattr(pGB.matrix, "dense_" + dtype)
+    dense_cls = getattr(pGB.matrix, f"dense_{dtype.value}")
 
     if obj is None:
         if dim is None:
@@ -450,8 +463,8 @@ def _sparse_matrix(
     itype = _infer_sparse_index_dtype(matrix_format, obj, cols, rows, itype)
 
     executor = pg.device(device)
-    matrix_cls = getattr(pGB.matrix, f"{matrix_format}_{dtype}_{itype}")
-
+    matrix_cls = getattr(pGB.matrix, f"{matrix_format}_{dtype.value}_{itype.value}")
+    
     if use_components:
         return matrix_cls(executor, dim, data, cols, rows)
     if obj is not None:
