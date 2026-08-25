@@ -65,9 +65,9 @@ def _normalize_numpy_dtype(dtype, allowed_types):
 
     gko_dtype = _numpy_to_gko_map(allowed_types).get(np_dtype.type)
 
-    if gko_dtype in allowed_types:
+    if gko_dtype is not None and gko_dtype in allowed_types:
         return gko_dtype
-    
+
     return None
 
 
@@ -82,9 +82,10 @@ def _normalize_torch_dtype(dtype, allowed_types):
         torch.int32: gko_types.IndexType.int32,
         torch.int64: gko_types.IndexType.int64,
     }
+
     gko_dtype = torch_map.get(dtype)
 
-    if gko_dtype in allowed_types:
+    if gko_dtype in set(allowed_types):
         return gko_dtype
 
     return None
