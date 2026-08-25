@@ -49,7 +49,7 @@ class TestArrayWrapper:
     def test_unsupported_dtype_raises_clear_error(self):
         data = np.array([1.0, 2.0, 3.0], dtype=np.float64)
 
-        with pytest.raises(ValueError, match="Not a valid dtype.*complex64"):
+        with pytest.raises(ValueError, match="Cannot find dtype *complex64"):
             pg.array(data, dtype="complex64")
 
     def test_missing_dtype_for_numpy_integer_allocation_raises_clear_error(self):
@@ -81,7 +81,7 @@ class TestDenseWrapper:
     def test_unsupported_dtype_raises_clear_error(self):
         data = np.array([[1, 2], [3, 4]], dtype=np.int32)
 
-        with pytest.raises(ValueError, match="Not a valid dtype.*int32"):
+        with pytest.raises(ValueError, match="Cannot find dtype *int32"):
             pg.dense(data, dtype="int32")
 
 

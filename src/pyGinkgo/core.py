@@ -121,18 +121,6 @@ def _try_infer_dtype(obj, allowed_types):
         return _infer_dtype(obj, allowed_types, name="input")
     except ValueError:
         return None
-    
-
-def _normalize_value_dtype(dtype):
-    return _normalize_dtype(dtype, gko_types.ValueType)
-
-
-def _normalize_array_dtype(dtype):
-    return _normalize_dtype(dtype, gko_types.dtype)
-
-
-def _normalize_index_dtype(dtype):
-    return _normalize_dtype(dtype, gko_types.IndexType)
 
 
 def _dtype_from_binding_name(obj, allowed_types):
@@ -201,7 +189,7 @@ def _infer_dtype(obj, allowed_types, *, name):
 
 def _infer_sparse_value_dtype(matrix_format, obj, data, dtype):
     if dtype is not None:
-        return _normalize_value_dtype(dtype)
+        return _normalize_dtype(dtype, gko_types.ValueType)
 
     source = data
     if source is None and obj is not None and hasattr(obj, "data"):
@@ -239,7 +227,7 @@ def _sparse_index_sources(matrix_format, obj, cols, rows):
 
 def _infer_sparse_index_dtype(matrix_format, obj, cols, rows, itype):
     if itype is not None:
-        return _normalize_index_dtype(itype)
+        return _normalize_dtype(itype, gko_types.IndexType)
 
     inferred = [
         dtype
@@ -366,7 +354,7 @@ def array(obj, device: gko_types.DeviceType = "cpu", dtype=None):
     dtype = (
         _infer_dtype(obj, gko_types.dtype, name="array input")
         if dtype is None
-        else _normalize_array_dtype(dtype)
+        else _normalize_dtype(dtype, gko_types.dtype)
     )
     executor = pg.device(device)
     array_cls = getattr(pGB.base, "array_" + dtype)
@@ -390,7 +378,7 @@ def dense(
             )
         dtype = _infer_dtype(obj, gko_types.ValueType, name="dense input")
     else:
-        dtype = _normalize_value_dtype(dtype)
+        dtype = _normalize_dtype(dtype, gko_types.ValueType)
 
     if torch_avail and isinstance(obj, torch.Tensor):
         _validate_torch_dense_device(obj, device)
