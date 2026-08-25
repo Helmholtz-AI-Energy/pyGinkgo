@@ -324,7 +324,7 @@ def _device_arg_info(device):
     if gko_types.ExecutorType.dpcpp in device_type:
         return "dpcpp", int(device_index) if device_index else 0
 
-    return "unknown", None
+    raise ValueError(f"Unknown device type: {device}")
 
 
 def _torch_device_info(tensor):
