@@ -203,3 +203,5 @@ cython_debug/
 src/pyGinkgo/pyGinkgoBindings/
 
 .venv_p
+.py-build-cmake_cache/
+py-build-cmake.local.toml

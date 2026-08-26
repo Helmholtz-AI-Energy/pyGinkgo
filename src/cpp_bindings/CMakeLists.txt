@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 #
 # SPDX-FileCopyrightText: 2024 pyGinkgo authors
+# SPDX-FileCopyrightText: 2026 Imad Kissami
 
 set(PYGINKGO_CPP_SOURCES
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/python.cpp
@@ -19,4 +20,5 @@ set(PYGINKGO_CPP_SOURCES
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/solver/gmres.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/solver/triangular.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp_bindings/factorization/factorization.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp_bindings/distributed.cpp
     PARENT_SCOPE)

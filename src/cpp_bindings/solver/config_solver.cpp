@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2024 - 2026 pyGinkgo authors
+// SPDX-FileCopyrightText: 2026 Imad Kissami
 //
 // SPDX-License-Identifier: MIT
 
@@ -25,9 +26,12 @@ std::shared_ptr<gko::LinOp> config_solver(std::shared_ptr<gko::Executor> exec,
     // This example does not use existing data.
     auto reg = gko::config::registry();
     // generate the linopfactory on the given executors
+    // Global index type int32 (matches the int32-global distributed binding;
+    // unused for non-distributed types, which only need ValueType + int32 local).
     auto solver_gen =
-        gko::config::parse(config, reg,
-                           gko::config::make_type_descriptor<ValueType>())
+        gko::config::parse(
+            config, reg,
+            gko::config::make_type_descriptor<ValueType, gko::int32, gko::int32>())
             .on(exec);
 
     // Create solver

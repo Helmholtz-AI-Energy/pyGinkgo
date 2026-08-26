@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2024 - 2026 pyGinkgo authors
+// SPDX-FileCopyrightText: 2026 Imad Kissami
 //
 // SPDX-License-Identifier: MIT
 
@@ -21,6 +22,7 @@ void add_allocator_classes(py::module_ &);
 void add_stream_classes(py::module_ &);
 void add_dpcpp_queue_property_enum(py::module_ &);
 void add_executor_classes(py::module_ &);
+void init_distributed(py::module_ &);
 
 PYBIND11_MODULE(pyGinkgoBindings, m)
 {
@@ -88,4 +90,8 @@ PYBIND11_MODULE(pyGinkgoBindings, m)
     py::module_ module_preconditioner = m.def_submodule(
         "preconditioner", "Submodule for Ginkgos preconditioner type bindings");
     init_ilu_all_types(module_preconditioner);
+
+    py::module_ module_distributed = m.def_submodule(
+        "distributed", "Submodule for Ginkgos MPI-distributed type bindings");
+    init_distributed(module_distributed);
 }
