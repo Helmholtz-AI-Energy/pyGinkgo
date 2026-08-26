@@ -35,6 +35,29 @@ def lobpcg_basic_standard_impl_(A, X0, nev,
     """
     pass
 
+def lobpcg_blopex_standard_impl_(A, X0, nev, *, 
+                           T=None, itmax=200, tol=1e-6,
+                           A_products="explicit"):
+    """
+    Knyazev, A. V., Argentati, M. E., Lashuk, I., & Ovtchinnikov, E. E. (2007)
+    Block locally optimal preconditioned eigenvalue Xolvers (BLOPEX) in Hypre and PETSc
+    SIAM Journal on Scientific Computing, 29(5), 2224-2239.
+
+    Parameters:
+    A          : left  hand-side operator, symmetric positive definite, n-by-n
+    X0         : initial iterates, n-by-m (m < n)
+    nev        : number of wanted eigenpairs, nev <= m
+    T          : precondontioner, symmetric positive definite, n-by-n
+    itmax      : maximum number of iterations
+    tol        : tolerance used for convergence criterion
+    A_products : if :implicit, the matrix products with A are updated implicitly
+        
+    Returns:
+    Lambda : last iterates of least dominant eigenvalues, m-by-1
+    X      : last iterates of least dominant eigenvectors, n-by-m
+    res    : normalized norms of eigenresiduals, m-by-it
+    """
+    pass
 
 def lobpcg(A, X0, nev,
            B=None, T=None, itmax=200, tol=1e-6,
@@ -62,7 +85,6 @@ def lobpcg(A, X0, nev,
     res    : normalized norms of eigenresiduals, m-by-it
     """
     pass
-
 
 def gmres(
     device: gko_types.DeviceType,
