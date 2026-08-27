@@ -148,8 +148,8 @@ static gko::array<T> array_on_exec(std::shared_ptr<const gko::Executor> exec,
 {
 #ifdef GINKGO_BUILD_CUDA
     if (py::hasattr(obj, "__cuda_array_interface__")) {
-        auto pn = cai_ptr_and_size<T>(obj);
-        auto view = gko::array<T>::view(exec, pn.second, pn.first);
+        auto ptr_size = cai_ptr_and_size<T>(obj);
+        auto view = gko::array<T>::view(exec, ptr_size.second, ptr_size.first);
         return gko::array<T>{exec, view};
     }
 #endif
