@@ -397,6 +397,27 @@ class TestBindingErrors:
         with pytest.raises(ValueError, match="partition size"):
             dist.matrix(executor, comm, part, rows, cols, vals, N + 1, dtype="double")
 
+    def test_matrix_rejects_out_of_range_index(self, executor, comm):
+        N = 8
+        owners, start, end = _block_distribution(N, comm)
+        part = dist.build_partition(executor, owners, comm.Get_size())
+        # A single triplet whose column index lies outside [0, N), injected
+        # identically on every rank so the raise happens before read_distributed.
+        rows = np.array([start], dtype=np.int32)
+        cols = np.array([N], dtype=np.int32)  # out of range
+        vals = np.array([1.0], dtype=np.float64)
+        with pytest.raises(ValueError, match="out-of-range global index"):
+            dist.matrix(executor, comm, part, rows, cols, vals, N, dtype="double")
+
+    def test_vector_rejects_out_of_range_index(self, executor, comm):
+        N = 8
+        owners, start, end = _block_distribution(N, comm)
+        part = dist.build_partition(executor, owners, comm.Get_size())
+        rows = np.array([N], dtype=np.int32)  # out of range
+        vals = np.array([1.0], dtype=np.float64)
+        with pytest.raises(ValueError, match="out-of-range global index"):
+            dist.vector(executor, comm, part, rows, vals, N, dtype="double")
+
     def test_vector_set_local_rejects_wrong_length(self, executor, comm):
         N = 8
         owners, start, end = _block_distribution(N, comm)
@@ -479,3 +500,59 @@ class TestDeviceBuffer:
             np.asarray(dist.vector_local(vec, dtype=dtype)).ravel(),
             (100 + np.arange(owned.size)).astype(_NP_DTYPE[dtype]),
         )
+
+    @pytest.mark.parametrize("dtype", ["float", "double"])
+    def test_device_array_dtype_mismatch_is_rejected(self, comm, dtype):
+        # A device array whose dtype does not match the binding must be rejected
+        # rather than silently reinterpreted (cai_ptr_and_size validates typestr).
+        if not _cuda_available():
+            pytest.skip("CUDA is not available")
+        if not _has_device_binding(dtype):
+            pytest.skip("build has no CUDA zero-copy vector_local_device binding")
+        cp = pytest.importorskip("cupy")
+
+        executor = pGB.CudaExecutor(0, pGB.ReferenceExecutor())
+        N, size = 12, comm.Get_size()
+        owners, start, end = _block_distribution(N, comm)
+        part = dist.build_partition(executor, owners, size)
+        owned = np.arange(start, end, dtype=np.int32)
+        vec = dist.vector(
+            executor,
+            comm,
+            part,
+            owned,
+            np.zeros(owned.size, dtype=_NP_DTYPE[dtype]),
+            N,
+            dtype=dtype,
+        )
+
+        wrong_np = np.float64 if dtype == "float" else np.float32
+        bad = cp.asarray(np.zeros(owned.size, dtype=wrong_np))
+        with pytest.raises(ValueError, match="dtype mismatch"):
+            dist.vector_set_local(vec, bad, dtype=dtype)
+
+    @pytest.mark.parametrize("dtype", ["float", "double"])
+    def test_on_device_rejects_non_cuda_executor(self, comm, dtype):
+        # In a CUDA-enabled build, asking for the device buffer of a vector that
+        # lives on a CPU executor must raise rather than advertise a host pointer
+        # as CUDA memory. Needs only the CUDA binding compiled in, not a GPU.
+        if not _has_device_binding(dtype):
+            pytest.skip("build has no CUDA zero-copy vector_local_device binding")
+
+        executor = pGB.ReferenceExecutor()
+        N, size = 12, comm.Get_size()
+        owners, start, end = _block_distribution(N, comm)
+        part = dist.build_partition(executor, owners, size)
+        owned = np.arange(start, end, dtype=np.int32)
+        vec = dist.vector(
+            executor,
+            comm,
+            part,
+            owned,
+            np.zeros(owned.size, dtype=_NP_DTYPE[dtype]),
+            N,
+            dtype=dtype,
+        )
+
+        with pytest.raises(AttributeError, match="CUDA executors"):
+            dist.vector_local(vec, dtype=dtype, on_device=True)

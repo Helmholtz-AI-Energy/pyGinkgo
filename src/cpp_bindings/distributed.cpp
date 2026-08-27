@@ -72,14 +72,22 @@ static gko::array<T> host_array_from_numpy(
     return out;
 }
 
+// Enforce the advertised [0, global_size) contract on a global index array,
+// for both host and device inputs. The array has already been materialized on
+// its executor; device arrays are cloned to host for the scan because Ginkgo
+// exposes no public device-side bounds reduction (these are the COO index
+// triplets, so the extra host copy is a one-off at assembly time). Catching
+// bad indices here yields a Python ValueError instead of letting them reach
+// Ginkgo's assembly internals.
 template <typename IndexType>
-static void validate_global_indices(py::array_t<IndexType> array,
+static void validate_global_indices(const gko::array<IndexType> &indices,
                                     const char *name,
                                     gko::size_type global_size)
 {
-    auto info = checked_1d(array, name);
-    const auto *data = static_cast<const IndexType *>(info.ptr);
-    for (py::ssize_t i = 0; i < info.shape[0]; ++i) {
+    auto host = indices.get_executor()->get_master();
+    gko::array<IndexType> host_indices(host, indices);
+    const auto *data = host_indices.get_const_data();
+    for (gko::size_type i = 0; i < host_indices.get_size(); ++i) {
         const auto idx = data[i];
         if (idx < 0 || static_cast<gko::size_type>(idx) >= global_size) {
             std::ostringstream os;
@@ -114,6 +122,32 @@ static std::pair<T *, gko::size_type> cai_ptr_and_size(py::object obj)
         throw py::value_error(
             "__cuda_array_interface__ array must be 1-D for the distributed "
             "binding");
+    }
+    // The pointer is reinterpreted as T*, so the reported dtype must match
+    // exactly -- otherwise e.g. a float64 array handed to the float binding
+    // would be read as pairs of unrelated float32 values.
+    auto typestr = cai["typestr"].cast<std::string>();
+    auto expected = get_cuda_array_typestr<T>();
+    if (typestr != expected) {
+        throw py::value_error(
+            "__cuda_array_interface__ dtype mismatch: array reports '" +
+            typestr + "' but this binding expects '" + expected + "'");
+    }
+    // The view is treated as contiguous, so reject strided (e.g. sliced)
+    // arrays: `strides` must be absent, None, or a 1-element tuple ==
+    // sizeof(T).
+    if (cai.contains("strides")) {
+        py::handle strides_obj = cai["strides"];
+        if (!strides_obj.is_none()) {
+            auto strides = strides_obj.cast<py::tuple>();
+            if (strides.size() != 1 ||
+                strides[0].cast<py::ssize_t>() !=
+                    static_cast<py::ssize_t>(sizeof(T))) {
+                throw py::value_error(
+                    "__cuda_array_interface__ array must be contiguous in "
+                    "memory for the distributed binding");
+            }
+        }
     }
     return {reinterpret_cast<T *>(data[0].cast<uintptr_t>()),
             shape[0].cast<gko::size_type>()};
@@ -216,6 +250,8 @@ static std::shared_ptr<gko::LinOp> build_matrix(
     // executor-consistent (the host-staging workaround is no longer needed).
     auto row_arr = array_on_exec<GIT>(exec, rows, "rows");
     auto col_arr = array_on_exec<GIT>(exec, cols, "cols");
+    validate_global_indices<GIT>(row_arr, "rows", global_size);
+    validate_global_indices<GIT>(col_arr, "cols", global_size);
     auto val_arr = array_on_exec<ValueType>(exec, vals, "vals");
 
     gko::device_matrix_data<ValueType, GIT> data(
@@ -242,6 +278,7 @@ static std::shared_ptr<gko::LinOp> build_vector(
     auto comm = comm_from_fortran(comm_handle);
 
     auto row_arr = array_on_exec<GIT>(exec, rows, "rows");
+    validate_global_indices<GIT>(row_arr, "rows", global_size);
     auto val_arr = array_on_exec<ValueType>(exec, vals, "vals");
     auto nnz = row_arr.get_size();
 
@@ -344,6 +381,17 @@ static py::tuple vector_local_device_info(std::shared_ptr<gko::LinOp> v)
             "vector_local_device: object is not a distributed vector of the "
             "requested value type");
     }
+    auto exec = vec->get_executor();
+    // Only a CUDA executor's buffer is a valid device address; exposing a host
+    // pointer through __cuda_array_interface__ would have CuPy dereference host
+    // memory as a device address. Guard + synchronize, as array.cpp/dense.cpp
+    // do.
+    if (!std::dynamic_pointer_cast<const gko::CudaExecutor>(exec)) {
+        throw py::attribute_error(
+            "vector_local on_device=True is only available for distributed "
+            "vectors on CUDA executors");
+    }
+    exec->synchronize();
     auto local = vec->get_local_vector();
     return py::make_tuple(
         reinterpret_cast<uintptr_t>(local->get_const_values()),
