@@ -37,9 +37,12 @@ if(PYGINKGO_GINKGO_HAS_MPI AND MPIEXEC_EXECUTABLE)
   # boundary.
   add_test(
     NAME pyginkgo_distributed_mpi_test
+    # FindMPI layout: mpiexec <NUMPROC_FLAG> <N> <PREFLAGS> <target> <POSTFLAGS>
+    # <args>. POSTFLAGS must sit right after the target (python), not after the
+    # pytest args, or non-empty postflags would be handed to pytest.
     COMMAND
       ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
-      ${Python_EXECUTABLE} -m pytest -vv -rs -p no:cacheprovider
-      ${CMAKE_CURRENT_SOURCE_DIR}/test_distributed.py ${MPIEXEC_POSTFLAGS}
+      ${Python_EXECUTABLE} ${MPIEXEC_POSTFLAGS} -m pytest -vv -rs -p
+      no:cacheprovider ${CMAKE_CURRENT_SOURCE_DIR}/test_distributed.py
     WORKING_DIRECTORY ${PYGINKGO_TESTS_WORK_DIR})
 endif()
