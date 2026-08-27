@@ -32,12 +32,13 @@ size = comm.Get_size()
 if not pg.distributed.available:
     raise RuntimeError(
         "pyGinkgo was built without MPI support (GINKGO_BUILD_MPI=ON). "
-        "The distributed bindings are unavailable.")
+        "The distributed bindings are unavailable."
+    )
 
 # ---------------------------------------------------------------- parameters
-N = 16                       # global system size
+N = 16  # global system size
 executor = pg.device("cuda")  # "cpu", "omp", or "cuda" / "cuda:0"
-value = "double"             # matches np.float64
+value = "double"  # matches np.float64
 
 # ----------------------------------------------------- row distribution (1D)
 # owners[g] = rank that owns global row g. Split the N rows into contiguous
@@ -49,7 +50,7 @@ owned_rows = np.arange(start, end, dtype=np.int32)
 
 owners = np.empty(N, dtype=np.int32)
 for r in range(size):
-    owners[offsets[r]:offsets[r + 1]] = r
+    owners[offsets[r] : offsets[r + 1]] = r
 
 partition = pg.distributed.build_partition(executor, owners, size)
 
@@ -58,36 +59,45 @@ partition = pg.distributed.build_partition(executor, owners, size)
 # Indices are 0-based GLOBAL indices.
 rows, cols, vals = [], [], []
 for i in range(start, end):
-    rows.append(i); cols.append(i); vals.append(2.0)
+    rows.append(i)
+    cols.append(i)
+    vals.append(2.0)
     if i > 0:
-        rows.append(i); cols.append(i - 1); vals.append(-1.0)
+        rows.append(i)
+        cols.append(i - 1)
+        vals.append(-1.0)
     if i < N - 1:
-        rows.append(i); cols.append(i + 1); vals.append(-1.0)
+        rows.append(i)
+        cols.append(i + 1)
+        vals.append(-1.0)
 
 rows = np.asarray(rows, dtype=np.int32)
 cols = np.asarray(cols, dtype=np.int32)
 vals = np.asarray(vals, dtype=np.float64)
 
-A = pg.distributed.matrix(executor, comm, partition, rows, cols, vals, N,
-                          dtype=value)
+A = pg.distributed.matrix(executor, comm, partition, rows, cols, vals, N, dtype=value)
 
 # ------------------------------------------------------ distributed RHS / sol
-b_local = np.ones(owned_rows.size, dtype=np.float64)        # b = 1
-x_local = np.zeros(owned_rows.size, dtype=np.float64)       # initial guess 0
+b_local = np.ones(owned_rows.size, dtype=np.float64)  # b = 1
+x_local = np.zeros(owned_rows.size, dtype=np.float64)  # initial guess 0
 
-b = pg.distributed.vector(executor, comm, partition, owned_rows, b_local, N,
-                          dtype=value)
-x = pg.distributed.vector(executor, comm, partition, owned_rows, x_local, N,
-                          dtype=value)
+b = pg.distributed.vector(
+    executor, comm, partition, owned_rows, b_local, N, dtype=value
+)
+x = pg.distributed.vector(
+    executor, comm, partition, owned_rows, x_local, N, dtype=value
+)
 
 # ------------------------------------------------------------------- solve
-solver_args = json.dumps({
-    "type": "solver::Cg",
-    "criteria": [
-        {"type": "Iteration", "max_iters": 1000},
-        {"type": "ResidualNorm", "reduction_factor": 1e-10},
-    ],
-})
+solver_args = json.dumps(
+    {
+        "type": "solver::Cg",
+        "criteria": [
+            {"type": "Iteration", "max_iters": 1000},
+            {"type": "ResidualNorm", "reduction_factor": 1e-10},
+        ],
+    }
+)
 
 logger = pGB.solver.config_solve_double(executor, A, b, x, solver_args)
 
@@ -96,9 +106,11 @@ logger = pGB.solver.config_solve_double(executor, A, b, x, solver_args)
 sol_local = pg.distributed.vector_local(x, dtype=value)
 
 if rank == 0:
-    print(f"[pyGinkgo distributed] N={N} ranks={size} "
-          f"converged={logger.has_converged()} "
-          f"iters={logger.get_num_iterations()}")
+    print(
+        f"[pyGinkgo distributed] N={N} ranks={size} "
+        f"converged={logger.has_converged()} "
+        f"iters={logger.get_num_iterations()}"
+    )
 
 # Gather the full solution on rank 0 just to print it (only for this demo).
 full = comm.gather(np.asarray(sol_local).ravel(), root=0)

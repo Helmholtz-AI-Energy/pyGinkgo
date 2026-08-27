@@ -2,19 +2,17 @@
 //
 // SPDX-License-Identifier: MIT
 
-#include "python.hpp"
-#include "utils.hpp"
-
 #include <algorithm>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 
+#include "python.hpp"
+#include "utils.hpp"
+
 namespace py = pybind11;
 
 #if GINKGO_BUILD_MPI
-
-#include <mpi.h>
 
 #include <ginkgo/core/base/device_matrix_data.hpp>
 #include <ginkgo/core/base/mpi.hpp>
@@ -22,6 +20,8 @@ namespace py = pybind11;
 #include <ginkgo/core/distributed/partition.hpp>
 #include <ginkgo/core/distributed/vector.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
+
+#include <mpi.h>
 
 namespace dist = gko::experimental::distributed;
 namespace mpi = gko::experimental::mpi;
@@ -37,19 +37,20 @@ static mpi::communicator comm_from_fortran(long fortran_handle)
     return mpi::communicator(c);
 }
 
-static py::buffer_info checked_1d(py::array array, const char* name)
+static py::buffer_info checked_1d(py::array array, const char *name)
 {
     auto info = array.request();
     if (info.ndim != 1) {
         std::ostringstream os;
-        os << name << " must be a 1-D array, got " << info.ndim << " dimensions";
+        os << name << " must be a 1-D array, got " << info.ndim
+           << " dimensions";
         throw py::value_error(os.str());
     }
     return info;
 }
 
-static void check_same_length(py::ssize_t lhs, const char* lhs_name,
-                              py::ssize_t rhs, const char* rhs_name)
+static void check_same_length(py::ssize_t lhs, const char *lhs_name,
+                              py::ssize_t rhs, const char *rhs_name)
 {
     if (lhs != rhs) {
         std::ostringstream os;
@@ -62,21 +63,22 @@ static void check_same_length(py::ssize_t lhs, const char* lhs_name,
 template <typename T>
 static gko::array<T> host_array_from_numpy(
     std::shared_ptr<const gko::Executor> host, py::array_t<T> array,
-    const char* name)
+    const char *name)
 {
     auto info = checked_1d(array, name);
     auto n = static_cast<gko::size_type>(info.shape[0]);
     gko::array<T> out(host, n);
-    std::copy_n(static_cast<const T*>(info.ptr), n, out.get_data());
+    std::copy_n(static_cast<const T *>(info.ptr), n, out.get_data());
     return out;
 }
 
 template <typename IndexType>
-static void validate_global_indices(py::array_t<IndexType> array, const char* name,
+static void validate_global_indices(py::array_t<IndexType> array,
+                                    const char *name,
                                     gko::size_type global_size)
 {
     auto info = checked_1d(array, name);
-    const auto* data = static_cast<const IndexType*>(info.ptr);
+    const auto *data = static_cast<const IndexType *>(info.ptr);
     for (py::ssize_t i = 0; i < info.shape[0]; ++i) {
         const auto idx = data[i];
         if (idx < 0 || static_cast<gko::size_type>(idx) >= global_size) {
@@ -88,7 +90,7 @@ static void validate_global_indices(py::array_t<IndexType> array, const char* na
     }
 }
 
-static void validate_partition_size(const PartT& partition,
+static void validate_partition_size(const PartT &partition,
                                     gko::size_type global_size)
 {
     if (static_cast<gko::size_type>(partition.get_size()) != global_size) {
@@ -103,7 +105,7 @@ static void validate_partition_size(const PartT& partition,
 // Extract a device pointer + element count from a 1-D __cuda_array_interface__
 // object (CuPy, numba device array, ...).
 template <typename T>
-static std::pair<T*, gko::size_type> cai_ptr_and_size(py::object obj)
+static std::pair<T *, gko::size_type> cai_ptr_and_size(py::object obj)
 {
     auto cai = obj.attr("__cuda_array_interface__").cast<py::dict>();
     auto data = cai["data"].cast<py::tuple>();
@@ -113,13 +115,13 @@ static std::pair<T*, gko::size_type> cai_ptr_and_size(py::object obj)
             "__cuda_array_interface__ array must be 1-D for the distributed "
             "binding");
     }
-    return {reinterpret_cast<T*>(data[0].cast<uintptr_t>()),
+    return {reinterpret_cast<T *>(data[0].cast<uintptr_t>()),
             shape[0].cast<gko::size_type>()};
 }
 #endif
 
 // 1-D length of a numpy host array OR a __cuda_array_interface__ device array.
-static gko::size_type pyobj_len(py::object obj, const char* name)
+static gko::size_type pyobj_len(py::object obj, const char *name)
 {
 #ifdef GINKGO_BUILD_CUDA
     if (py::hasattr(obj, "__cuda_array_interface__")) {
@@ -144,7 +146,7 @@ static gko::size_type pyobj_len(py::object obj, const char* name)
 // independently of the Python source's lifetime).
 template <typename T>
 static gko::array<T> array_on_exec(std::shared_ptr<const gko::Executor> exec,
-                                   py::object obj, const char* name)
+                                   py::object obj, const char *name)
 {
 #ifdef GINKGO_BUILD_CUDA
     if (py::hasattr(obj, "__cuda_array_interface__")) {
@@ -158,7 +160,7 @@ static gko::array<T> array_on_exec(std::shared_ptr<const gko::Executor> exec,
     auto n = static_cast<gko::size_type>(info.shape[0]);
     auto host = exec->get_master();
     gko::array<T> host_arr(host, n);
-    std::copy_n(static_cast<const T*>(info.ptr), n, host_arr.get_data());
+    std::copy_n(static_cast<const T *>(info.ptr), n, host_arr.get_data());
     return gko::array<T>{exec, host_arr};
 }
 
@@ -175,7 +177,7 @@ static std::shared_ptr<PartT> build_partition(
     if (owner_info.shape[0] == 0) {
         throw py::value_error("owners must not be empty");
     }
-    const auto* owner_data = static_cast<const int*>(owner_info.ptr);
+    const auto *owner_data = static_cast<const int *>(owner_info.ptr);
     for (py::ssize_t i = 0; i < owner_info.shape[0]; ++i) {
         if (owner_data[i] < 0 || owner_data[i] >= num_parts) {
             std::ostringstream os;
@@ -199,9 +201,11 @@ static std::shared_ptr<gko::LinOp> build_matrix(
 {
     auto n = pyobj_len(rows, "rows");
     check_same_length(static_cast<py::ssize_t>(n), "rows",
-                      static_cast<py::ssize_t>(pyobj_len(cols, "cols")), "cols");
+                      static_cast<py::ssize_t>(pyobj_len(cols, "cols")),
+                      "cols");
     check_same_length(static_cast<py::ssize_t>(n), "rows",
-                      static_cast<py::ssize_t>(pyobj_len(vals, "vals")), "vals");
+                      static_cast<py::ssize_t>(pyobj_len(vals, "vals")),
+                      "vals");
     validate_partition_size(*partition, global_size);
 
     auto comm = comm_from_fortran(comm_handle);
@@ -231,7 +235,8 @@ static std::shared_ptr<gko::LinOp> build_vector(
 {
     auto n = pyobj_len(rows, "rows");
     check_same_length(static_cast<py::ssize_t>(n), "rows",
-                      static_cast<py::ssize_t>(pyobj_len(vals, "vals")), "vals");
+                      static_cast<py::ssize_t>(pyobj_len(vals, "vals")),
+                      "vals");
     validate_partition_size(*partition, global_size);
 
     auto comm = comm_from_fortran(comm_handle);
@@ -258,7 +263,8 @@ static py::array_t<ValueType> vector_local(std::shared_ptr<gko::LinOp> v)
     auto vec = std::dynamic_pointer_cast<dist::Vector<ValueType>>(v);
     if (!vec) {
         throw py::type_error(
-            "vector_local: object is not a distributed vector of the requested value type");
+            "vector_local: object is not a distributed vector of the requested "
+            "value type");
     }
     auto host = vec->get_executor()->get_master();
     auto local = vec->get_local_vector();
@@ -266,11 +272,11 @@ static py::array_t<ValueType> vector_local(std::shared_ptr<gko::LinOp> v)
     const auto nrows = static_cast<py::ssize_t>(host_local->get_size()[0]);
     const auto ncols = static_cast<py::ssize_t>(host_local->get_size()[1]);
     const auto stride = static_cast<py::ssize_t>(host_local->get_stride());
-    const auto* values = host_local->get_const_values();
+    const auto *values = host_local->get_const_values();
 
     if (ncols == 1) {
         py::array_t<ValueType> out(nrows);
-        auto* out_data = static_cast<ValueType*>(out.request().ptr);
+        auto *out_data = static_cast<ValueType *>(out.request().ptr);
         for (py::ssize_t row = 0; row < nrows; ++row) {
             out_data[row] = values[row];
         }
@@ -278,7 +284,7 @@ static py::array_t<ValueType> vector_local(std::shared_ptr<gko::LinOp> v)
     }
 
     py::array_t<ValueType> out({nrows, ncols});
-    auto* out_data = static_cast<ValueType*>(out.request().ptr);
+    auto *out_data = static_cast<ValueType *>(out.request().ptr);
     for (py::ssize_t col = 0; col < ncols; ++col) {
         for (py::ssize_t row = 0; row < nrows; ++row) {
             out_data[row * ncols + col] = values[row + col * stride];
@@ -303,8 +309,8 @@ static void vector_set_local(std::shared_ptr<gko::LinOp> v, py::object vals)
     }
     // The local part is owned by the vector; we only overwrite its values
     // (no resize), so const_cast on the buffer is safe here.
-    auto* local = const_cast<gko::matrix::Dense<ValueType>*>(
-        vec->get_local_vector());
+    auto *local =
+        const_cast<gko::matrix::Dense<ValueType> *>(vec->get_local_vector());
     const auto nrows = local->get_size()[0];
     const auto ncols = local->get_size()[1];
     if (ncols != 1) {
@@ -319,8 +325,8 @@ static void vector_set_local(std::shared_ptr<gko::LinOp> v, py::object vals)
         throw py::value_error(os.str());
     }
     auto exec = local->get_executor();
-    // Bring vals onto the vector's executor (host copy, or zero-copy device view
-    // then an owning copy), then overwrite the contiguous local buffer.
+    // Bring vals onto the vector's executor (host copy, or zero-copy device
+    // view then an owning copy), then overwrite the contiguous local buffer.
     auto src = array_on_exec<ValueType>(exec, vals, "vals");
     exec->copy(n, src.get_const_data(), local->get_values());
 }
@@ -348,14 +354,15 @@ static py::tuple vector_local_device_info(std::shared_ptr<gko::LinOp> v)
 #endif
 
 template <typename ValueType>
-static void init_distributed_for_type(py::module_& m, const std::string& vt)
+static void init_distributed_for_type(py::module_ &m, const std::string &vt)
 {
-    m.def(("matrix_" + vt).c_str(), &build_matrix<ValueType>, py::arg("exec"),
-          py::arg("comm_handle"), py::arg("partition"), py::arg("rows"),
-          py::arg("cols"), py::arg("vals"), py::arg("global_size"),
-          "Build a distributed Csr matrix from global COO triplets. The matrix "
-          "is square: its shape is global_size x global_size. Row/column indices "
-          "must lie in [0, global_size).");
+    m.def(
+        ("matrix_" + vt).c_str(), &build_matrix<ValueType>, py::arg("exec"),
+        py::arg("comm_handle"), py::arg("partition"), py::arg("rows"),
+        py::arg("cols"), py::arg("vals"), py::arg("global_size"),
+        "Build a distributed Csr matrix from global COO triplets. The matrix "
+        "is square: its shape is global_size x global_size. Row/column indices "
+        "must lie in [0, global_size).");
 
     m.def(("vector_" + vt).c_str(), &build_vector<ValueType>, py::arg("exec"),
           py::arg("comm_handle"), py::arg("partition"), py::arg("rows"),
@@ -380,12 +387,13 @@ static void init_distributed_for_type(py::module_& m, const std::string& vt)
 #endif
 }
 
-void init_distributed(py::module_& m)
+void init_distributed(py::module_ &m)
 {
     py::class_<PartT, std::shared_ptr<PartT>>(m, "Partition")
         .def("get_num_parts", &PartT::get_num_parts)
-        .def_property_readonly("size", [](const PartT& p) { return p.get_size(); })
-        .def("__repr__", [](const PartT& p) {
+        .def_property_readonly("size",
+                               [](const PartT &p) { return p.get_size(); })
+        .def("__repr__", [](const PartT &p) {
             std::ostringstream os;
             os << "<pyGinkgo.distributed.Partition size=" << p.get_size()
                << " num_parts=" << p.get_num_parts() << ">";
@@ -409,6 +417,6 @@ void init_distributed(py::module_& m)
 
 #else  // GINKGO_BUILD_MPI
 
-void init_distributed(py::module_& m) { m.attr("available") = false; }
+void init_distributed(py::module_ &m) { m.attr("available") = false; }
 
 #endif  // GINKGO_BUILD_MPI

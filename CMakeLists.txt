@@ -99,14 +99,16 @@ target_link_libraries(pyGinkgoBindings PUBLIC nlohmann_json::nlohmann_json)
 set_property(TARGET pyGinkgoBindings PROPERTY CXX_STANDARD 14)
 
 # MPI / distributed bindings: only built when Ginkgo is compiled with MPI.
-# FetchContent builds expose GINKGO_BUILD_MPI as a cache variable, while installed
-# Ginkgo packages may only expose it through target compile definitions.
+# FetchContent builds expose GINKGO_BUILD_MPI as a cache variable, while
+# installed Ginkgo packages may only expose it through target compile
+# definitions.
 set(PYGINKGO_GINKGO_HAS_MPI OFF)
 if(DEFINED GINKGO_BUILD_MPI AND GINKGO_BUILD_MPI)
   set(PYGINKGO_GINKGO_HAS_MPI ON)
 endif()
 if(TARGET Ginkgo::ginkgo)
-  get_target_property(_ginkgo_compile_defs Ginkgo::ginkgo INTERFACE_COMPILE_DEFINITIONS)
+  get_target_property(_ginkgo_compile_defs Ginkgo::ginkgo
+                      INTERFACE_COMPILE_DEFINITIONS)
   if(_ginkgo_compile_defs)
     foreach(_ginkgo_def IN LISTS _ginkgo_compile_defs)
       if(_ginkgo_def MATCHES "(^|[<:])GINKGO_BUILD_MPI($|[>:])")
