@@ -3,7 +3,7 @@ name: LRZ GitLab CI
 on:
   push:
     branches: [develop, main]
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, unlabeled, labeled]
   schedule:
     - cron: '00 8 * * 0'  # Runs at 10 AM CEST (08:00 UTC) every Sunday
@@ -29,8 +29,8 @@ jobs:
       skip-intel: ${{ steps.skip-labels.outputs.skip-intel }}
 
     if: >
-      github.event_name != 'pull_request' ||
-      !contains(github.event.pull_request.labels.*.name, 'skip-build')
+      github.event_name != 'pull_request_target' ||
+      !contains(github.event.pull_request_target.labels.*.name, 'skip-build')
 
     env:
       LRZ_GROUP: greole
@@ -50,7 +50,7 @@ jobs:
       - name: Determine branch
         id: branch
         run: |
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request"* ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request_target"* ]]; then
             BRANCH="$GITHUB_HEAD_REF"
           else
             BRANCH=${GITHUB_REF_NAME#refs/heads/}
@@ -67,7 +67,7 @@ jobs:
           echo "skip-intel=false" >> $GITHUB_OUTPUT
 
           # Only check labels if this is a PR
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request_target" ]]; then
             labels=$(jq -r '.pull_request.labels[].name // empty' "$GITHUB_EVENT_PATH")
             for label in $labels; do
               case "$label" in
@@ -89,7 +89,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote add lrz https://oauth2:${PYGINKGO_PROJECT_TOKEN}@${{ env.LRZ_HOST }}/${{ env.LRZ_GROUP }}/${{ env.REPO_NAME }}.git
-          git fetch origin ${{ steps.branch.outputs.branch }}
+          # git remote add incoming ${{ github.event.pull_request.head.repo.clone_url }}
+          # git fetch incoming  ${{ steps.branch.outputs.branch }}
           git checkout -B ${{ steps.branch.outputs.branch }} origin/${{ steps.branch.outputs.branch }}
           git reset --hard origin/${{ steps.branch.outputs.branch }}
           git push --force lrz HEAD:refs/heads/${{ steps.branch.outputs.branch }}
