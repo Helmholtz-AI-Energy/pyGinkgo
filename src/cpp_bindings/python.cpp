@@ -7,6 +7,10 @@
 namespace py = pybind11;
 
 void init_array_all_types(py::module_ &);
+void init_communicator(py::module_ &);
+void init_partition(py::module_ &);
+void init_vector_all_types(py::module_ &);
+void init_dist_matrix_all_types(py::module_ &);
 void init_dense_all_types(py::module_ &);
 void init_sparse_all_types(py::module_ &);
 void init_logger_all_types(py::module_ &);
@@ -88,4 +92,11 @@ PYBIND11_MODULE(pyGinkgoBindings, m)
     py::module_ module_preconditioner = m.def_submodule(
         "preconditioner", "Submodule for Ginkgos preconditioner type bindings");
     init_ilu_all_types(module_preconditioner);
+
+    py::module_ module_distributed = m.def_submodule(
+        "distributed", "Submodule for Ginkgos distributed bindings");
+    init_communicator(module_distributed);
+    init_partition(module_distributed);
+    init_vector_all_types(module_distributed);
+    init_dist_matrix_all_types(module_distributed);
 }
