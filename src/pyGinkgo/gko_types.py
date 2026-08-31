@@ -86,7 +86,7 @@ class ExecutorType(DatatypeEnum):
 
 DeviceType = Union[ExecutorType, pGB.Executor, str]
 
-# Reverse mappings: numpy dtype → Ginkgo type string.
+# Reverse mappings: numpy dtype → corresponding Ginkgo type.
 # CuPy dtypes are numpy-compatible, so these work for both.
-NUMPY_TO_GKO_VALUE = {v.numpy_type: v.value for v in ValueType}
-NUMPY_TO_GKO_INDEX = {v.numpy_type: v.value for v in IndexType}
+NUMPY_TO_GKO_VALUE = {v.numpy_type: v for v in ValueType}
+NUMPY_TO_GKO_INDEX = {v.numpy_type: v for v in IndexType}

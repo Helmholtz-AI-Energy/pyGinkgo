@@ -22,6 +22,507 @@ except ImportError:
 
 # TODO: add tests for the functions in this file
 
+_STRING_DTYPE_ALIASES = {
+    "half": gko_types.ValueType.half,
+    "float16": gko_types.ValueType.half,
+    "float": gko_types.ValueType.float,
+    "float32": gko_types.ValueType.float,
+    "single": gko_types.ValueType.float,
+    "double": gko_types.ValueType.double,
+    "float64": gko_types.ValueType.double,
+    "int32": gko_types.IndexType.int32,
+    "int64": gko_types.IndexType.int64,
+    "longlong": gko_types.IndexType.int64,
+}
+
+
+def _dtype_values(allowed_types):
+    return [dtype.value for dtype in list(allowed_types)]
+
+
+def _dtype_choices(allowed_types):
+    return ", ".join(_dtype_values(allowed_types))
+
+
+def _numpy_to_gko_map(allowed_types):
+    allowed = set(allowed_types)
+    mapping = {}
+
+    if allowed.intersection(gko_types.ValueType):
+        mapping.update(gko_types.NUMPY_TO_GKO_VALUE)
+
+    if allowed.intersection(gko_types.IndexType):
+        mapping.update(gko_types.NUMPY_TO_GKO_INDEX)
+
+    return mapping
+
+
+def _normalize_numpy_dtype(dtype, allowed_types):
+    try:
+        np_dtype = np.dtype(dtype)
+    except (TypeError, ValueError):
+        return None
+
+    gko_dtype = _numpy_to_gko_map(allowed_types).get(np_dtype.type)
+
+    if gko_dtype is not None and gko_dtype in allowed_types:
+        return gko_dtype
+
+    return None
+
+
+def _normalize_torch_dtype(dtype, allowed_types):
+    if not torch_avail:
+        return None
+
+    torch_map = {
+        torch.float16: gko_types.ValueType.half,
+        torch.float32: gko_types.ValueType.float,
+        torch.float64: gko_types.ValueType.double,
+        torch.int32: gko_types.IndexType.int32,
+        torch.int64: gko_types.IndexType.int64,
+    }
+
+    gko_dtype = torch_map.get(dtype)
+
+    if gko_dtype in set(allowed_types):
+        return gko_dtype
+
+    return None
+
+
+def _normalize_dtype(dtype, allowed_types):
+    if dtype is None:
+        return None
+
+    allowed = set(allowed_types)
+
+    # Already a Ginkgo dtype enum
+    if isinstance(dtype, gko_types.NpDatatypeEnum):
+        if dtype in allowed:
+            return dtype
+
+    # Direct PyTorch -> Ginkgo mapping
+    torch_dtype = _normalize_torch_dtype(dtype, allowed_types)
+    if torch_dtype is not None:
+        return torch_dtype
+
+    if isinstance(dtype, str):
+        gko_dtype = _STRING_DTYPE_ALIASES.get(dtype.lower())
+
+        if gko_dtype in allowed:
+            return gko_dtype
+
+    # Direct NumPy -> Ginkgo mapping
+    numpy_dtype = _normalize_numpy_dtype(dtype, allowed_types)
+    if numpy_dtype is not None:
+        return numpy_dtype
+
+    raise ValueError(
+        f"Cannot find dtype {dtype}. "
+        f"Possible choices are: {_dtype_choices(allowed_types)}"
+    )
+
+
+def _try_normalize_dtype(dtype, allowed_types):
+    try:
+        return _normalize_dtype(dtype, allowed_types)
+    except ValueError:
+        return None
+
+
+def _try_infer_dtype(obj, allowed_types):
+    try:
+        return _infer_dtype(obj, allowed_types, name="input")
+    except ValueError:
+        return None
+
+
+def _dtype_from_binding_name(obj, allowed_types):
+    type_name = type(obj).__name__
+    parts = type_name.split("_")
+    if len(parts) < 2:
+        return None
+
+    return _try_normalize_dtype(parts[1], allowed_types)
+
+
+def _dtype_from_array_protocol(obj, allowed_types):
+    for protocol_name in ("__cuda_array_interface__", "__array_interface__"):
+        if not hasattr(obj, protocol_name):
+            continue
+        typestr = getattr(obj, protocol_name).get("typestr")
+        dtype_name = _normalize_numpy_dtype(typestr, allowed_types)
+        if dtype_name is not None:
+            return dtype_name
+
+    return None
+
+
+def _infer_dtype(obj, allowed_types, *, name):
+    if obj is None:
+        raise ValueError(
+            f"Cannot infer dtype for {name}. Please specify dtype. "
+            f"Possible choices are: {_dtype_choices(allowed_types)}"
+        )
+
+    binding_dtype = _dtype_from_binding_name(obj, allowed_types)
+    if binding_dtype is not None:
+        return binding_dtype
+
+    if hasattr(obj, "dtype"):
+        dtype_name = _try_normalize_dtype(obj.dtype, allowed_types)
+        if dtype_name is not None:
+            return dtype_name
+
+    protocol_dtype = _dtype_from_array_protocol(obj, allowed_types)
+    if protocol_dtype is not None:
+        return protocol_dtype
+
+    try:
+        np_array = np.asarray(obj)
+    except Exception:
+        np_array = None
+
+    if (
+        np_array is not None
+        and np_array.size > 0
+        and np_array.dtype != np.dtype("O")
+    ):
+        dtype_name = _normalize_numpy_dtype(np_array.dtype, allowed_types)
+        if dtype_name is not None:
+            return dtype_name
+
+    raise ValueError(
+        f"Cannot infer dtype for {name}. Please specify dtype. "
+        f"Possible choices are: {_dtype_choices(allowed_types)}"
+    )
+
+
+def _infer_sparse_value_dtype(matrix_format, obj, data, dtype):
+    if dtype is not None:
+        return _normalize_dtype(dtype, gko_types.ValueType)
+
+    source = data
+    if source is None and obj is not None and hasattr(obj, "data"):
+        source = obj.data
+    if source is None:
+        source = obj
+
+    return _infer_dtype(
+        source,
+        gko_types.ValueType,
+        name=f"{matrix_format} value input",
+    )
+
+
+def _sparse_index_sources(matrix_format, obj, cols, rows):
+    if cols is not None or rows is not None:
+        return [source for source in (cols, rows) if source is not None]
+
+    if obj is None:
+        return []
+
+    if matrix_format == "Csr":
+        return [
+            getattr(obj, name)
+            for name in ("indices", "indptr")
+            if hasattr(obj, name)
+        ]
+
+    return [
+        getattr(obj, name)
+        for name in ("col", "row")
+        if hasattr(obj, name)
+    ]
+
+
+def _infer_sparse_index_dtype(matrix_format, obj, cols, rows, itype):
+    if itype is not None:
+        return _normalize_dtype(itype, gko_types.IndexType)
+
+    inferred = [
+        dtype
+        for dtype in (
+            _try_infer_dtype(source, gko_types.IndexType)
+            for source in _sparse_index_sources(matrix_format, obj, cols, rows)
+        )
+        if dtype is not None
+    ]
+
+    if not inferred:
+        raise ValueError(
+            f"Cannot infer itype for {matrix_format} index input. "
+            "Please specify itype. "
+            f"Possible choices are: {_dtype_choices(gko_types.IndexType)}"
+        )
+
+    if len(set(inferred)) > 1:
+        found = sorted(dtype.value for dtype in set(inferred))
+
+        raise ValueError(
+            f"Cannot infer a single itype for {matrix_format} index input. "
+            f"Found: {', '.join(found)}. "
+            "Please specify itype."
+        )
+
+    return inferred[0]
+
+
+def _require_sparse_components(matrix_format, dim, data, cols, rows):
+    missing = [
+        name
+        for name, value in (
+            ("dim", dim),
+            ("data", data),
+            ("cols", cols),
+            ("rows", rows),
+        )
+        if value is None
+    ]
+    if missing:
+        raise ValueError(
+            f"{matrix_format} component construction requires dim, data, "
+            f"cols, and rows. Missing: {', '.join(missing)}."
+        )
+    
+def _executor_device_info(executor):
+    if isinstance(executor, (pGB.ReferenceExecutor, pGB.OmpExecutor)):
+        return "cpu", None
+
+    if hasattr(pGB, "CudaExecutor") and isinstance(executor, pGB.CudaExecutor):
+        return "cuda", getattr(executor, "device_id", None)
+
+    if hasattr(pGB, "HipExecutor") and isinstance(executor, pGB.HipExecutor):
+        return "hip", getattr(executor, "device_id", None)
+
+    if hasattr(pGB, "DpcppExecutor") and isinstance(executor, pGB.DpcppExecutor):
+        return "dpcpp", getattr(executor, "device_id", None)
+
+    return "unknown", None
+
+
+def _device_arg_info(device):
+    if isinstance(device, pGB.Executor):
+        return _executor_device_info(device)
+
+    device_type, _, device_index = str(device).partition(":")
+    device_type = device_type.lower()
+
+    if gko_types.ExecutorType.cpu in device_type:
+        return "cpu", None
+
+    if gko_types.ExecutorType.omp in device_type:
+        return "cpu", None
+
+    if gko_types.ExecutorType.cuda in device_type:
+        return "cuda", int(device_index) if device_index else 0
+
+    if gko_types.ExecutorType.hip in device_type:
+        return "hip", int(device_index) if device_index else 0
+
+    if gko_types.ExecutorType.dpcpp in device_type:
+        return "dpcpp", int(device_index) if device_index else 0
+
+    raise ValueError(f"Unknown device type: {device}")
+
+
+def _torch_device_info(tensor):
+    kind = tensor.device.type
+
+    if kind == "cpu":
+        return "cpu", None
+
+    return kind, tensor.device.index
+
+
+def _format_device_info(kind, index):
+    if index is None:
+        return kind
+    return f"{kind}:{index}"
+
+
+def _validate_torch_dense_device(obj, device):
+    tensor_kind, tensor_index = _torch_device_info(obj)
+    requested_kind, requested_index = _device_arg_info(device)
+
+    if (tensor_kind, tensor_index) == (requested_kind, requested_index):
+        return
+
+    raise ValueError(
+        "Torch tensor device does not match Ginkgo executor device: "
+        f"tensor is on '{obj.device}', but dense() was requested on "
+        f"'{_format_device_info(requested_kind, requested_index)}'. "
+        "Explicit device copies are not supported yet."
+    )
+
+
+def array(obj, device: gko_types.DeviceType = "cpu", dtype=None):
+    """Create a Ginkgo array, inferring dtype from obj when possible."""
+    if dtype is None and isinstance(obj, (int, np.integer)) and not isinstance(obj, bool):
+        raise ValueError(
+            "Cannot infer dtype for array size allocation. "
+            "Please specify dtype."
+        )
+
+    dtype = (
+        _infer_dtype(obj, gko_types.dtype, name="array input")
+        if dtype is None
+        else _normalize_dtype(dtype, gko_types.dtype)
+    )
+    executor = pg.device(device)
+    array_cls = getattr(pGB.base, f"array_{dtype.value}")
+    return array_cls(executor, obj)
+
+
+def dense(
+    obj=None,
+    dim: Optional[tuple] = None,
+    device: gko_types.DeviceType = "cpu",
+    dtype=None,
+    fill: Optional[float] = None,
+    stride: Optional[int] = None,
+):
+    """Create a Ginkgo dense matrix, inferring dtype from obj when possible."""
+    if dtype is None:
+        if obj is None:
+            raise ValueError(
+                "Cannot infer dtype for dense allocation. "
+                "Please specify dtype."
+            )
+        dtype = _infer_dtype(obj, gko_types.ValueType, name="dense input")
+    else:
+        dtype = _normalize_dtype(dtype, gko_types.ValueType)
+
+    if torch_avail and isinstance(obj, torch.Tensor):
+        _validate_torch_dense_device(obj, device)
+    elif isinstance(obj, tuple):
+        obj = np.asarray(obj)
+
+    executor = pg.device(device)
+    dense_cls = getattr(pGB.matrix, f"dense_{dtype.value}")
+
+    if obj is None:
+        if dim is None:
+            res = dense_cls(executor)
+        elif stride is None:
+            res = dense_cls(executor, dim)
+        else:
+            res = dense_cls(executor, dim, stride)
+    elif dim is None:
+        res = dense_cls(executor, obj)
+    else:
+        if stride is None:
+            raise ValueError(
+                "dense construction with obj and dim requires stride."
+            )
+        res = dense_cls(executor, dim, obj, stride)
+
+    if fill is not None:
+        res.fill(fill)
+
+    return res
+
+
+def _sparse_matrix(
+    matrix_format,
+    obj=None,
+    *,
+    device: gko_types.DeviceType = "cpu",
+    dtype=None,
+    itype=None,
+    dim=None,
+    data=None,
+    cols=None,
+    rows=None,
+):
+    component_args = (dim, data, cols, rows)
+    use_components = any(value is not None for value in component_args)
+
+    if obj is not None and use_components:
+        raise ValueError(
+            f"Pass either a {matrix_format}-like object or component "
+            "arrays, not both."
+        )
+
+    if obj is None and not use_components:
+        if dtype is None:
+            raise ValueError(
+                f"Cannot infer dtype for {matrix_format} allocation. "
+                "Please specify dtype."
+            )
+        if itype is None:
+            raise ValueError(
+                f"Cannot infer itype for {matrix_format} allocation. "
+                "Please specify itype."
+            )
+
+    if use_components:
+        _require_sparse_components(matrix_format, dim, data, cols, rows)
+
+    dtype = _infer_sparse_value_dtype(matrix_format, obj, data, dtype)
+    itype = _infer_sparse_index_dtype(matrix_format, obj, cols, rows, itype)
+
+    executor = pg.device(device)
+    matrix_cls = getattr(pGB.matrix, f"{matrix_format}_{dtype.value}_{itype.value}")
+    
+    if use_components:
+        return matrix_cls(executor, dim, data, cols, rows)
+    if obj is not None:
+        return matrix_cls(executor, obj)
+    return matrix_cls(executor)
+
+
+def Csr(
+    obj=None,
+    *,
+    device: gko_types.DeviceType = "cpu",
+    dtype=None,
+    itype=None,
+    dim=None,
+    data=None,
+    cols=None,
+    rows=None,
+):
+    """Create a Ginkgo CSR matrix, inferring dtype and itype when possible."""
+    return _sparse_matrix(
+        "Csr",
+        obj,
+        device=device,
+        dtype=dtype,
+        itype=itype,
+        dim=dim,
+        data=data,
+        cols=cols,
+        rows=rows,
+    )
+
+
+def Coo(
+    obj=None,
+    *,
+    device: gko_types.DeviceType = "cpu",
+    dtype=None,
+    itype=None,
+    dim=None,
+    data=None,
+    cols=None,
+    rows=None,
+):
+    """Create a Ginkgo COO matrix, inferring dtype and itype when possible."""
+    return _sparse_matrix(
+        "Coo",
+        obj,
+        device=device,
+        dtype=dtype,
+        itype=itype,
+        dim=dim,
+        data=data,
+        cols=cols,
+        rows=rows,
+    )
+
+
 def as_array(obj, device: gko_types.DeviceType = "cpu", dtype="float"):
     """create a ginkgo array from a given object"""
     if not dtype in gko_types.dtype:
