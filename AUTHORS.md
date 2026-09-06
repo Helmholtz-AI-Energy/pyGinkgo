@@ -7,4 +7,5 @@ Gregor Olenik <gregor.olenik@kit.edu>, Karlsruhe Institute of Technology\
 Keshvi Tuteja <keshvi.tuteja@kit.edu>, Karlsruhe Institute of Technology\
 Rickard Holmberg <rickard.holmberg@novatronfusion.com>, Novatron Fusion Group\
 Yu-Hsiang Tsai <yhmtsai@gmail.com>, Technical University of Munich\
-Kai-Hui You <kai-hui.you@tum.de>, Technical University of Munich
+Kai-Hui You <kai-hui.you@tum.de>, Technical University of Munich\
+Mouad Haikal <mouad.haikal@um6p.ma>, University Mohammed VI Polytechnic
