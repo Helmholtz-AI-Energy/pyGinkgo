@@ -132,15 +132,9 @@ def test_blopex_finds_smallest_eigenvalues():
     X_np = _to_numpy(X)
 
     # Check the actual eigenvalue equations rather than only Lambda.
-    residual = (
-        A_np @ X_np
-        - X_np * Lambda.reshape(1, -1)
-    )
+    residual = A_np @ X_np - X_np * Lambda.reshape(1, -1)
 
-    relative_residual = (
-        np.linalg.norm(residual, axis=0)
-        / np.abs(Lambda)
-    )
+    relative_residual = np.linalg.norm(residual, axis=0) / np.abs(Lambda)
 
     assert np.all(relative_residual[:2] < 1e-6)
 
@@ -174,6 +168,7 @@ def test_blopex_returns_orthonormal_eigenvectors():
         rtol=1e-5,
         atol=1e-6,
     )
+
 
 def test_blopex_supports_nev_smaller_than_block_size():
     n = 12
@@ -213,6 +208,7 @@ def test_blopex_supports_nev_smaller_than_block_size():
 
     assert np.all(res[:nev, -1] < 1e-6)
 
+
 def test_blopex_matches_numpy_on_dense_spd_problem():
     n = 12
     m = 2
@@ -223,11 +219,7 @@ def test_blopex_matches_numpy_on_dense_spd_problem():
 
     expected_eigenvalues = np.arange(1.0, n + 1.0)
 
-    A_np = (
-        Q
-        @ np.diag(expected_eigenvalues)
-        @ Q.T
-    )
+    A_np = Q @ np.diag(expected_eigenvalues) @ Q.T
 
     X0_np = rng.normal(size=(n, m))
 
@@ -251,17 +243,12 @@ def test_blopex_matches_numpy_on_dense_spd_problem():
 
     X_np = _to_numpy(X)
 
-    residual = (
-        A_np @ X_np
-        - X_np * Lambda.reshape(1, -1)
-    )
+    residual = A_np @ X_np - X_np * Lambda.reshape(1, -1)
 
-    relative_residual = (
-        np.linalg.norm(residual, axis=0)
-        / np.abs(Lambda)
-    )
+    relative_residual = np.linalg.norm(residual, axis=0) / np.abs(Lambda)
 
     assert np.all(relative_residual[:2] < 1e-6)
+
 
 def test_blopex_rejects_invalid_nev():
     _, _, A, X0 = _diagonal_problem()
@@ -313,6 +300,7 @@ def test_blopex_rejects_nonpositive_tolerance():
             tol=0.0,
         )
 
+
 def test_blopex_rejects_oversized_block():
     n = 5
     m = 2
@@ -330,6 +318,7 @@ def test_blopex_rejects_oversized_block():
             nev=2,
             method="BLOPEX",
         )
+
 
 def test_blopex_zero_iterations_returns_initial_ritz_step():
     _, _, A, X0 = _diagonal_problem()

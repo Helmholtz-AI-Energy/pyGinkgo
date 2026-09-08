@@ -212,9 +212,7 @@ class TestDense:
         with pytest.raises(AttributeError):
             dense.shape = (4, 4)
 
-    def test_dense_column_scale(
-        self, data_type: pg.gko_types.ValueType
-    ):
+    def test_dense_column_scale(self, data_type: pg.gko_types.ValueType):
         dense_cls = getattr(
             pGB.matrix,
             "dense_" + data_type,
@@ -244,7 +242,8 @@ class TestDense:
 
         np.testing.assert_allclose(
             np.asarray(x.copy_to_host()),
-            x_np * np.array(
+            x_np
+            * np.array(
                 [2.0, 3.0],
                 dtype=np_type,
             ),
@@ -252,9 +251,7 @@ class TestDense:
             atol=d_precision_map[data_type],
         )
 
-    def test_dense_lobpcg_operations(
-        self, data_type: pg.gko_types.ValueType
-    ):
+    def test_dense_lobpcg_operations(self, data_type: pg.gko_types.ValueType):
         executor = pGB.ReferenceExecutor()
 
         dense_cls = getattr(pGB.matrix, "dense_" + data_type)
