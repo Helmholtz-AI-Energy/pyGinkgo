@@ -211,3 +211,167 @@ class TestDense:
         assert dense.shape == (3, 3)
         with pytest.raises(AttributeError):
             dense.shape = (4, 4)
+
+    def test_dense_column_scale(
+        self, data_type: pg.gko_types.ValueType
+    ):
+        dense_cls = getattr(
+            pGB.matrix,
+            "dense_" + data_type,
+        )
+        np_type = data_type.numpy_type
+
+        x_np = np.array(
+            [
+                [1.0, 2.0],
+                [3.0, 4.0],
+                [5.0, 6.0],
+            ],
+            dtype=np_type,
+        )
+
+        x = dense_cls(self.ref, x_np)
+
+        alpha = dense_cls(
+            self.ref,
+            np.array(
+                [[2.0, 3.0]],
+                dtype=np_type,
+            ),
+        )
+
+        x.scale(alpha)
+
+        np.testing.assert_allclose(
+            np.asarray(x.copy_to_host()),
+            x_np * np.array(
+                [2.0, 3.0],
+                dtype=np_type,
+            ),
+            rtol=d_precision_map[data_type],
+            atol=d_precision_map[data_type],
+        )
+
+    def test_dense_lobpcg_operations(
+        self, data_type: pg.gko_types.ValueType
+    ):
+        executor = pGB.ReferenceExecutor()
+
+        dense_cls = getattr(pGB.matrix, "dense_" + data_type)
+        np_type = data_type.numpy_type
+
+        values = np.array(
+            [
+                [1.0, 2.0],
+                [3.0, 4.0],
+                [5.0, 6.0],
+            ],
+            dtype=np_type,
+        )
+
+        x = dense_cls(executor, values)
+
+        # clone()
+        cloned = x.clone()
+        assert cloned.shape == x.shape
+
+        np.testing.assert_allclose(
+            np.asarray(cloned.copy_to_host()),
+            values,
+            rtol=d_precision_map[data_type],
+            atol=d_precision_map[data_type],
+        )
+
+        # create_with_config_of()
+        work = x.create_with_config_of()
+        assert work.shape == x.shape
+
+        # copy_from()
+        work.copy_from(x)
+
+        np.testing.assert_allclose(
+            np.asarray(work.copy_to_host()),
+            values,
+            rtol=d_precision_map[data_type],
+            atol=d_precision_map[data_type],
+        )
+
+        # create_with_type_of() + transpose_into()
+        transpose = x.create_with_type_of((2, 3))
+        x.transpose_into(transpose)
+
+        np.testing.assert_allclose(
+            np.asarray(transpose.copy_to_host()),
+            values.T,
+            rtol=d_precision_map[data_type],
+            atol=d_precision_map[data_type],
+        )
+
+        # Column-wise scale.
+        scale = dense_cls(
+            executor,
+            np.array([[2.0, 3.0]], dtype=np_type),
+        )
+
+        work.copy_from(x)
+        work.scale(scale)
+
+        np.testing.assert_allclose(
+            np.asarray(work.copy_to_host()),
+            values * np.array([2.0, 3.0], dtype=np_type),
+            rtol=d_precision_map[data_type],
+            atol=d_precision_map[data_type],
+        )
+
+        # compute_norm2()
+        norms = x.create_with_type_of((1, 2))
+        x.compute_norm2(norms)
+
+        np.testing.assert_allclose(
+            np.asarray(norms.copy_to_host()).reshape(-1),
+            np.linalg.norm(values, axis=0),
+            rtol=d_precision_map[data_type],
+            atol=d_precision_map[data_type],
+        )
+
+    def test_dense_advanced_apply_with_python_scalars(
+        self, data_type: pg.gko_types.ValueType
+    ):
+        dense_cls = getattr(pGB.matrix, "dense_" + data_type)
+        np_type = data_type.numpy_type
+
+        A = dense_cls(
+            self.ref,
+            np.eye(2, dtype=np_type),
+        )
+
+        b = dense_cls(
+            self.ref,
+            np.array(
+                [
+                    [1.0],
+                    [2.0],
+                ],
+                dtype=np_type,
+            ),
+        )
+
+        x = dense_cls(
+            self.ref,
+            np.array(
+                [
+                    [10.0],
+                    [20.0],
+                ],
+                dtype=np_type,
+            ),
+        )
+
+        A.apply(2.0, b, 3.0, x)
+
+        np.testing.assert_allclose(
+            np.array(x.copy_to_host()).reshape(-1),
+            np.array([32.0, 64.0], dtype=np_type),
+            rtol=d_precision_map[data_type],
+            atol=d_precision_map[data_type],
+        )
