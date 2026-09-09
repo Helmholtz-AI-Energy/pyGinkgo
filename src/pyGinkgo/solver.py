@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 from pyGinkgo import pyGinkgoBindings as pGB
-from .pyGinkgoBindings.solver import *
 import pyGinkgo as pg
 from . import gko_types
 import numpy as np
@@ -42,7 +41,7 @@ def _right_multiply(X, C, out, beta=0.0):
         X.apply(1.0, C_gko, beta, out)
 
 
-def _orthonormalize_blopex(
+def _orthonormalize_blopex_standard(
     W,
     work,
     transpose,
@@ -132,8 +131,136 @@ def _orthonormalize_blopex(
         _right_multiply(AW, transform, work)
         AW.copy_from(work)
 
+def _orthonormalize_blopex_generalized(
+    W,
+    BW,
+    work,
+    transpose,
+    gram,
+    *,
+    AW=None,
+    update_BW=True,
+):
+    """B-orthonormalize a BLOPEX block.
 
-def _rayleigh_ritz_blopex(
+    Given BW = B @ W, form
+
+        G = W.T @ BW.
+
+    With
+
+        G = L @ L.T,
+
+    compute
+
+        C = inv(L.T)
+        W <- W @ C.
+
+    Then
+
+        W.T @ B @ W = I.
+
+    If ``update_BW`` is True, BW is transformed with the same
+    right factor:
+
+        BW <- BW @ C.
+
+    If AW is supplied, it is also transformed:
+
+        AW <- AW @ C.
+
+    Updating AW is required when A-products are maintained implicitly.
+    """
+    n, m = tuple(W.shape)
+
+    if tuple(BW.shape) != (n, m):
+        raise ValueError(
+            f"BW must have shape {(n, m)}, got {tuple(BW.shape)}."
+        )
+
+    if tuple(work.shape) != (n, m):
+        raise ValueError(
+            f"work must have shape {(n, m)}, got {tuple(work.shape)}."
+        )
+
+    if tuple(transpose.shape) != (m, n):
+        raise ValueError(
+            f"transpose must have shape {(m, n)}, "
+            f"got {tuple(transpose.shape)}."
+        )
+
+    if tuple(gram.shape) != (m, m):
+        raise ValueError(
+            f"gram must have shape {(m, m)}, got {tuple(gram.shape)}."
+        )
+
+    if AW is not None and tuple(AW.shape) != (n, m):
+        raise ValueError(
+            f"AW must have shape {(n, m)}, got {tuple(AW.shape)}."
+        )
+
+    # G = W.T @ B @ W = W.T @ BW.
+    W.transpose_into(transpose)
+    transpose.apply(BW, gram)
+
+    G = np.array(
+        gram.copy_to_host(),
+        copy=True,
+    ).reshape(m, m)
+
+    G = 0.5 * (G + G.T)
+
+    if G.dtype == np.float16:
+        G = G.astype(np.float32)
+
+    try:
+        L = np.linalg.cholesky(G)
+    except np.linalg.LinAlgError as error:
+        raise np.linalg.LinAlgError(
+            "BLOPEX block is rank deficient in the B-inner product, "
+            "or B is not positive definite."
+        ) from error
+
+    # G = L L.T.
+    #
+    # We want C such that
+    #
+    #     C.T G C = I.
+    #
+    # Therefore C = inv(L.T).
+    transform = np.linalg.solve(
+        L.T,
+        np.eye(m, dtype=G.dtype),
+    )
+
+    # W <- W @ transform.
+    _right_multiply(
+        W,
+        transform,
+        work,
+    )
+    W.copy_from(work)
+
+    if update_BW:
+        # BW <- BW @ transform.
+        _right_multiply(
+            BW,
+            transform,
+            work,
+        )
+        BW.copy_from(work)
+
+    if AW is not None:
+        # AW <- AW @ transform.
+        _right_multiply(
+            AW,
+            transform,
+            work,
+        )
+        AW.copy_from(work)
+
+
+def _rayleigh_ritz_blopex_standard(
     blocks,
     a_blocks,
     transpose,
@@ -281,6 +408,177 @@ def _rayleigh_ritz_blopex(
 
     return hX, Lambda
 
+def _rayleigh_ritz_blopex_generalized(
+    blocks,
+    a_blocks,
+    b_blocks,
+    transpose,
+    small,
+):
+    """Perform generalized BLOPEX Rayleigh-Ritz.
+
+    ``blocks`` contains the trial basis blocks V,
+    ``a_blocks`` contains A @ V, and
+    ``b_blocks`` contains B @ V.
+
+    The projected generalized eigenproblem is
+
+        H c = G c lambda,
+
+    with
+
+        H = V.T @ A @ V
+        G = V.T @ B @ V.
+
+    Only the small projected matrices are transferred to the host.
+
+    Returns
+    -------
+    hX : numpy.ndarray
+        Ritz coefficient matrix with shape (q*m, m), where q is the
+        number of trial blocks.
+    Lambda : numpy.ndarray
+        The m smallest Ritz values.
+    """
+    blocks = tuple(blocks)
+    a_blocks = tuple(a_blocks)
+    b_blocks = tuple(b_blocks)
+
+    if not blocks:
+        raise ValueError("blocks must not be empty.")
+
+    if len(blocks) != len(a_blocks):
+        raise ValueError(
+            "blocks and a_blocks must contain the same number of blocks."
+        )
+
+    if len(blocks) != len(b_blocks):
+        raise ValueError(
+            "blocks and b_blocks must contain the same number of blocks."
+        )
+
+    n, m = tuple(blocks[0].shape)
+
+    if tuple(transpose.shape) != (m, n):
+        raise ValueError(
+            f"transpose must have shape {(m, n)}, "
+            f"got {tuple(transpose.shape)}."
+        )
+
+    if tuple(small.shape) != (m, m):
+        raise ValueError(
+            f"small must have shape {(m, m)}, "
+            f"got {tuple(small.shape)}."
+        )
+
+    for i, (block, a_block, b_block) in enumerate(
+        zip(blocks, a_blocks, b_blocks)
+    ):
+        if tuple(block.shape) != (n, m):
+            raise ValueError(
+                f"blocks[{i}] must have shape {(n, m)}, "
+                f"got {tuple(block.shape)}."
+            )
+
+        if tuple(a_block.shape) != (n, m):
+            raise ValueError(
+                f"a_blocks[{i}] must have shape {(n, m)}, "
+                f"got {tuple(a_block.shape)}."
+            )
+
+        if tuple(b_block.shape) != (n, m):
+            raise ValueError(
+                f"b_blocks[{i}] must have shape {(n, m)}, "
+                f"got {tuple(b_block.shape)}."
+            )
+
+    h_rows = []
+    g_rows = []
+
+    for left in blocks:
+        left.transpose_into(transpose)
+
+        h_row = []
+        g_row = []
+
+        # H_ij = V_i.T @ A @ V_j.
+        for right_a in a_blocks:
+            transpose.apply(right_a, small)
+
+            h_row.append(
+                np.array(
+                    small.copy_to_host(),
+                    copy=True,
+                ).reshape(m, m)
+            )
+
+        # G_ij = V_i.T @ B @ V_j.
+        for right_b in b_blocks:
+            transpose.apply(right_b, small)
+
+            g_row.append(
+                np.array(
+                    small.copy_to_host(),
+                    copy=True,
+                ).reshape(m, m)
+            )
+
+        h_rows.append(h_row)
+        g_rows.append(g_row)
+
+    H = np.block(h_rows)
+    G = np.block(g_rows)
+
+    # Theoretically symmetric, but remove small numerical asymmetry.
+    H = 0.5 * (H + H.T)
+    G = 0.5 * (G + G.T)
+
+    if H.dtype == np.float16:
+        H = H.astype(np.float32)
+
+    if G.dtype == np.float16:
+        G = G.astype(np.float32)
+
+    # Solve
+    #
+    #     H c = G c lambda
+    #
+    # using G = L L.T.
+    try:
+        L = np.linalg.cholesky(G)
+    except np.linalg.LinAlgError as error:
+        raise np.linalg.LinAlgError(
+            "BLOPEX projected B-Gram matrix is rank deficient "
+            "or not positive definite."
+        ) from error
+
+    # reduced = L^-1 H L^-T
+    left_reduced = np.linalg.solve(
+        L,
+        H,
+    )
+
+    reduced = np.linalg.solve(
+        L,
+        left_reduced.T,
+    ).T
+
+    reduced = 0.5 * (reduced + reduced.T)
+
+    Lambda, reduced_vectors = np.linalg.eigh(reduced)
+
+    # Smallest m Ritz pairs.
+    Lambda = Lambda[:m]
+    reduced_vectors = reduced_vectors[:, :m]
+
+    # c = L^-T y.
+    hX = np.linalg.solve(
+        L.T,
+        reduced_vectors,
+    )
+
+    return hX, Lambda
+
 
 def _standard_residual(
     AX,
@@ -364,6 +662,99 @@ def _standard_residual(
         where=denominator != 0,
     )
 
+def _generalized_residual(
+    AX,
+    BX,
+    Lambda,
+    R,
+    work,
+    norms,
+):
+    """Compute generalized-problem relative residuals.
+
+    Computes
+
+        R[:, i] =
+            AX[:, i] - Lambda[i] * BX[:, i]
+
+    for the generalized eigenproblem
+
+        A x = lambda B x,
+
+    and returns
+
+        ||R[:, i]||_2 / abs(Lambda[i]).
+    """
+    n, m = tuple(AX.shape)
+
+    if tuple(BX.shape) != (n, m):
+        raise ValueError(
+            f"BX must have shape {(n, m)}, got {tuple(BX.shape)}."
+        )
+
+    if tuple(R.shape) != (n, m):
+        raise ValueError(
+            f"R must have shape {(n, m)}, got {tuple(R.shape)}."
+        )
+
+    if tuple(work.shape) != (n, m):
+        raise ValueError(
+            f"work must have shape {(n, m)}, got {tuple(work.shape)}."
+        )
+
+    if tuple(norms.shape) != (1, m):
+        raise ValueError(
+            f"norms must have shape {(1, m)}, got {tuple(norms.shape)}."
+        )
+
+    Lambda = np.asarray(Lambda).reshape(-1)
+
+    if Lambda.size != m:
+        raise ValueError(
+            f"Lambda must contain {m} values, got {Lambda.size}."
+        )
+
+    lambda_row = type(BX)(
+        BX.get_executor(),
+        np.ascontiguousarray(
+            Lambda.reshape(1, m)
+        ),
+    )
+
+    # work[:, i] = Lambda[i] * BX[:, i].
+    work.copy_from(BX)
+    work.scale(lambda_row)
+
+    # R = AX - BX @ diag(Lambda).
+    R.copy_from(AX)
+    R.sub_scaled(
+        1.0,
+        work,
+    )
+
+    R.compute_norm2(norms)
+
+    residual_norms = np.array(
+        norms.copy_to_host(),
+        copy=True,
+    ).reshape(m)
+
+    denominator = np.abs(Lambda)
+
+    return np.divide(
+        residual_norms,
+        denominator,
+        out=np.full(
+            m,
+            np.inf,
+            dtype=np.result_type(
+                residual_norms,
+                np.float64,
+            ),
+        ),
+        where=denominator != 0,
+    )
+
 def lobpcg_basic_standard_impl_(A, X0, nev,
                           T, itmax, tol,
                           A_products):
@@ -434,11 +825,16 @@ def blopex_lobpcg_standard_impl_(
             "X0.shape[0]."
         )
 
-    if 3 * m > n:
+    if itmax >= 1 and 2 * m > n:
+        raise ValueError(
+            "BLOPEX requires 2 * X0.shape[1] <= X0.shape[0] "
+            "for the first Rayleigh-Ritz step over [X, Z]."
+        )
+
+    if itmax >= 2 and 3 * m > n:
         raise ValueError(
             "BLOPEX requires 3 * X0.shape[1] <= X0.shape[0] "
-            "because the later Rayleigh-Ritz step uses "
-            "the trial basis [X, Z, P]."
+            "for later Rayleigh-Ritz steps over [X, Z, P]."
         )
 
     if itmax < 0:
@@ -506,7 +902,7 @@ def blopex_lobpcg_standard_impl_(
     #       AX = A @ X
     # ==================================================================
 
-    _orthonormalize_blopex(
+    _orthonormalize_blopex_standard(
         X,
         W,
         transpose,
@@ -515,7 +911,7 @@ def blopex_lobpcg_standard_impl_(
 
     A.apply(X, AX)
 
-    hX, Lambda = _rayleigh_ritz_blopex(
+    hX, Lambda = _rayleigh_ritz_blopex_standard(
         (X,),
         (AX,),
         transpose,
@@ -575,7 +971,7 @@ def blopex_lobpcg_standard_impl_(
         #   U = chol(ZtZ)
         #   Z = Z @ inv(U)
         #
-        _orthonormalize_blopex(
+        _orthonormalize_blopex_standard(
             Z,
             W,
             transpose,
@@ -595,7 +991,7 @@ def blopex_lobpcg_standard_impl_(
             #   hX, Lambda = RR_BLOPEX1(X, Z, AX, AZ, Z)
             # ==========================================================
 
-            hX, Lambda = _rayleigh_ritz_blopex(
+            hX, Lambda = _rayleigh_ritz_blopex_standard(
                 (X, Z),
                 (AX, AZ),
                 transpose,
@@ -642,7 +1038,7 @@ def blopex_lobpcg_standard_impl_(
             # ==========================================================
 
             if A_products == "implicit":
-                _orthonormalize_blopex(
+                _orthonormalize_blopex_standard(
                     P,
                     W,
                     transpose,
@@ -650,7 +1046,7 @@ def blopex_lobpcg_standard_impl_(
                     AW=AP,
                 )
             else:
-                _orthonormalize_blopex(
+                _orthonormalize_blopex_standard(
                     P,
                     W,
                     transpose,
@@ -662,7 +1058,7 @@ def blopex_lobpcg_standard_impl_(
             # RR over span{X, Z, P}.
             # ----------------------------------------------------------
 
-            hX, Lambda = _rayleigh_ritz_blopex(
+            hX, Lambda = _rayleigh_ritz_blopex_standard(
                 (X, Z, P),
                 (AX, AZ, AP),
                 transpose,
@@ -780,6 +1176,503 @@ def blopex_lobpcg_standard_impl_(
 
     return Lambda, X, res
 
+def blopex_lobpcg_generalized_impl_(
+    A,
+    B,
+    X0,
+    nev,
+    *,
+    T=None,
+    itmax=200,
+    tol=1e-6,
+    A_products="implicit",
+    B_products="implicit",
+):
+    """
+    Knyazev, A. V., Argentati, M. E., Lashuk, I., & Ovtchinnikov, E. E. (2007)
+    Block locally optimal preconditioned eigenvalue Xolvers (BLOPEX) in Hypre and PETSc
+    SIAM Journal on Scientific Computing, 29(5), 2224-2239.
+
+    Parameters:
+    A          : left  hand-side operator, symmetric positive definite, n-by-n
+    B          : right hand-side operator, symmetric positive definite, n-by-n
+    X0         : initial iterates, n-by-m (m < n)
+    nev        : number of wanted eigenpairs, nev <= m
+    T          : precondontioner, symmetric positive definite, n-by-n
+    itmax      : maximum number of BLOPEX iterations
+    tol        : tolerance used for convergence criterion
+    A_products : If "implicit", update A-products using the small Ritz
+                transformations. If "explicit", recompute them with A.
+    B_products : If "implicit", update B-products using the small Ritz
+                transformations. If "explicit", recompute them with B.
+
+    Returns:
+    Lambda : Last Ritz values, shape (m,)
+    X      : Last Ritz vectors, shape (n, m)
+    res    : Relative residual history, shape (m, num_iterations + 1)
+    """
+    n, m = tuple(X0.shape)
+
+    if not 1 <= nev <= m:
+        raise ValueError(
+            "nev must satisfy 1 <= nev <= X0.shape[1]."
+        )
+
+    if m >= n:
+        raise ValueError(
+            "The block size X0.shape[1] must be smaller than "
+            "X0.shape[0]."
+        )
+
+    if itmax >= 1 and 2 * m > n:
+        raise ValueError(
+            "BLOPEX requires 2 * X0.shape[1] <= X0.shape[0] "
+            "for the first Rayleigh-Ritz step over [X, Z]."
+        )
+
+    if itmax >= 2 and 3 * m > n:
+        raise ValueError(
+            "BLOPEX requires 3 * X0.shape[1] <= X0.shape[0] "
+            "for later Rayleigh-Ritz steps over [X, Z, P]."
+        )
+
+    if itmax < 0:
+        raise ValueError(
+            "itmax must be non-negative."
+        )
+
+    if tol <= 0.0:
+        raise ValueError(
+            "tol must be positive."
+        )
+
+    if A_products not in {"implicit", "explicit"}:
+        raise ValueError(
+            "A_products must be 'implicit' or 'explicit'."
+        )
+
+    if B_products not in {"implicit", "explicit"}:
+        raise ValueError(
+            "B_products must be 'implicit' or 'explicit'."
+        )
+
+    # ------------------------------------------------------------------
+    # BLOPEX workspaces
+    # ------------------------------------------------------------------
+
+    X = X0.clone()
+
+    R = X0.create_with_config_of()
+    Z = X0.create_with_config_of()
+    P = X0.create_with_config_of()
+    W = X0.create_with_config_of()
+
+    AX = X0.create_with_config_of()
+    AZ = X0.create_with_config_of()
+    AP = X0.create_with_config_of()
+
+    BX = X0.create_with_config_of()
+    BZ = X0.create_with_config_of()
+    BP = X0.create_with_config_of()
+
+    transpose = X0.create_with_type_of((m, n))
+    small = X0.create_with_type_of((m, m))
+    norms = X0.create_with_type_of((1, m))
+
+    res = np.full(
+        (m, itmax + 1),
+        np.nan,
+        dtype=np.float64,
+    )
+
+    k = 0
+
+    # ==================================================================
+    # Initialization
+    # ==================================================================
+    #
+    # Reference:
+    #
+    #   BX = B @ X
+    #   XtBX = X.T @ BX
+    #   U = chol(XtBX)
+    #   X = X @ inv(U)
+    #
+    #   if B_products == "implicit":
+    #       BX = BX @ inv(U)
+    #   else:
+    #       BX = B @ X
+    #
+    #   AX = A @ X
+    #   Rayleigh-Ritz
+    # ==================================================================
+
+    B.apply(X, BX)
+
+    _orthonormalize_blopex_generalized(
+        X,
+        BX,
+        W,
+        transpose,
+        small,
+        update_BW=(B_products == "implicit"),
+    )
+
+    if B_products == "explicit":
+        B.apply(X, BX)
+
+    A.apply(X, AX)
+
+    hX, Lambda = _rayleigh_ritz_blopex_generalized(
+        (X,),
+        (AX,),
+        (BX,),
+        transpose,
+        small,
+    )
+
+    # X = X @ hX.
+    _right_multiply(
+        X,
+        hX,
+        W,
+    )
+    X.copy_from(W)
+
+    if A_products == "implicit":
+        # AX = AX @ hX.
+        _right_multiply(
+            AX,
+            hX,
+            W,
+        )
+        AX.copy_from(W)
+    else:
+        A.apply(X, AX)
+
+    if B_products == "implicit":
+        # BX = BX @ hX.
+        _right_multiply(
+            BX,
+            hX,
+            W,
+        )
+        BX.copy_from(W)
+    else:
+        B.apply(X, BX)
+
+    # R = AX - BX @ diag(Lambda).
+    res[:, 0] = _generalized_residual(
+        AX,
+        BX,
+        Lambda,
+        R,
+        W,
+        norms,
+    )
+
+    # Preserve the reference implementation's locking/counting rule:
+    # only consecutive leading Ritz pairs count as converged.
+    for i in range(k, nev):
+        if res[i, 0] < tol:
+            k += 1
+        else:
+            break
+
+    if k >= nev or itmax == 0:
+        return (
+            Lambda,
+            X,
+            res[:, :1],
+        )
+
+    # ==================================================================
+    # BLOPEX iteration
+    # ==================================================================
+
+    for j in range(1, itmax + 1):
+
+        # --------------------------------------------------------------
+        # Z = T(R), or Z = R.
+        # --------------------------------------------------------------
+
+        if T is not None:
+            T.apply(R, Z)
+        else:
+            Z.copy_from(R)
+
+        # --------------------------------------------------------------
+        # B-orthonormalize Z.
+        #
+        # Reference:
+        #
+        #   BZ = B @ Z
+        #   ZtBZ = Z.T @ BZ
+        #   U = chol(ZtBZ)
+        #   Z = Z @ inv(U)
+        # --------------------------------------------------------------
+
+        B.apply(Z, BZ)
+
+        _orthonormalize_blopex_generalized(
+            Z,
+            BZ,
+            W,
+            transpose,
+            small,
+            update_BW=(B_products == "implicit"),
+        )
+
+        if B_products == "explicit":
+            B.apply(Z, BZ)
+
+        A.apply(Z, AZ)
+
+        if j == 1:
+            # ==========================================================
+            # First BLOPEX iteration:
+            #
+            #     V = [X, Z]
+            #
+            #     (V.T A V) hX
+            #         =
+            #     (V.T B V) hX Lambda
+            # ==========================================================
+
+            hX, Lambda = _rayleigh_ritz_blopex_generalized(
+                (X, Z),
+                (AX, AZ),
+                (BX, BZ),
+                transpose,
+                small,
+            )
+
+            hX_X = hX[:m, :]
+            hX_Z = hX[m:2 * m, :]
+
+            # P = Z @ hX_Z.
+            _right_multiply(
+                Z,
+                hX_Z,
+                P,
+            )
+
+            if A_products == "implicit":
+                # AP = AZ @ hX_Z.
+                _right_multiply(
+                    AZ,
+                    hX_Z,
+                    AP,
+                )
+            else:
+                A.apply(P, AP)
+
+            if B_products == "implicit":
+                # BP = BZ @ hX_Z.
+                _right_multiply(
+                    BZ,
+                    hX_Z,
+                    BP,
+                )
+            else:
+                B.apply(P, BP)
+
+        else:
+            # ==========================================================
+            # B-orthonormalize P.
+            #
+            # Reference:
+            #
+            #   PtBP = P.T @ BP
+            #   U = chol(PtBP)
+            #   P = P @ inv(U)
+            #
+            # The corresponding AP / BP products have to undergo
+            # exactly the same transformation in implicit mode.
+            # ==========================================================
+
+            _orthonormalize_blopex_generalized(
+                P,
+                BP,
+                W,
+                transpose,
+                small,
+                AW=(
+                    AP
+                    if A_products == "implicit"
+                    else None
+                ),
+                update_BW=(B_products == "implicit"),
+            )
+
+            if A_products == "explicit":
+                A.apply(P, AP)
+
+            if B_products == "explicit":
+                B.apply(P, BP)
+
+            # ----------------------------------------------------------
+            # RR over span{X, Z, P}.
+            # ----------------------------------------------------------
+
+            hX, Lambda = _rayleigh_ritz_blopex_generalized(
+                (X, Z, P),
+                (AX, AZ, AP),
+                (BX, BZ, BP),
+                transpose,
+                small,
+            )
+
+            hX_X = hX[:m, :]
+            hX_Z = hX[m:2 * m, :]
+            hX_P = hX[2 * m:3 * m, :]
+
+            # ----------------------------------------------------------
+            # P = Z @ hX_Z + P @ hX_P
+            # ----------------------------------------------------------
+
+            _right_multiply(
+                P,
+                hX_P,
+                W,
+            )
+
+            _right_multiply(
+                Z,
+                hX_Z,
+                W,
+                beta=1.0,
+            )
+
+            P.copy_from(W)
+
+            # ----------------------------------------------------------
+            # AP = AZ @ hX_Z + AP @ hX_P
+            # ----------------------------------------------------------
+
+            if A_products == "implicit":
+                _right_multiply(
+                    AP,
+                    hX_P,
+                    W,
+                )
+
+                _right_multiply(
+                    AZ,
+                    hX_Z,
+                    W,
+                    beta=1.0,
+                )
+
+                AP.copy_from(W)
+
+            else:
+                A.apply(P, AP)
+
+            # ----------------------------------------------------------
+            # BP = BZ @ hX_Z + BP @ hX_P
+            # ----------------------------------------------------------
+
+            if B_products == "implicit":
+                _right_multiply(
+                    BP,
+                    hX_P,
+                    W,
+                )
+
+                _right_multiply(
+                    BZ,
+                    hX_Z,
+                    W,
+                    beta=1.0,
+                )
+
+                BP.copy_from(W)
+
+            else:
+                B.apply(P, BP)
+
+        # ==============================================================
+        # X = P + X @ hX_X
+        # ==============================================================
+
+        W.copy_from(P)
+
+        _right_multiply(
+            X,
+            hX_X,
+            W,
+            beta=1.0,
+        )
+
+        X.copy_from(W)
+
+        # ==============================================================
+        # AX = AP + AX @ hX_X
+        # ==============================================================
+
+        if A_products == "implicit":
+            W.copy_from(AP)
+
+            _right_multiply(
+                AX,
+                hX_X,
+                W,
+                beta=1.0,
+            )
+
+            AX.copy_from(W)
+
+        else:
+            A.apply(X, AX)
+
+        # ==============================================================
+        # BX = BP + BX @ hX_X
+        # ==============================================================
+
+        if B_products == "implicit":
+            W.copy_from(BP)
+
+            _right_multiply(
+                BX,
+                hX_X,
+                W,
+                beta=1.0,
+            )
+
+            BX.copy_from(W)
+
+        else:
+            B.apply(X, BX)
+
+        # ==============================================================
+        # R = AX - BX @ diag(Lambda)
+        # ==============================================================
+
+        res[:, j] = _generalized_residual(
+            AX,
+            BX,
+            Lambda,
+            R,
+            W,
+            norms,
+        )
+
+        for i in range(k, nev):
+            if res[i, j] < tol:
+                k += 1
+            else:
+                break
+
+        if k >= nev:
+            return (
+                Lambda,
+                X,
+                res[:, :j + 1],
+            )
+
+    return Lambda, X, res
+
 def lobpcg(A, X0, nev,
            B=None, T=None, itmax=200, tol=1e-6,
            method='BLOPEX',
@@ -801,9 +1694,10 @@ def lobpcg(A, X0, nev,
     B_products : if "implicit", the matrix products with B are updated implicitly
 
     Returns:
-    Lambda : last iterates of least dominant eigenvalues, m-by-1
+    Lambda : ndarray, shape (m,)
     X      : last iterates of least dominant eigenvectors, n-by-m
-    res    : normalized norms of eigenresiduals, m-by-it
+    res : ndarray, shape (m, num_iterations + 1)
+        Relative residual history including the initial Ritz step.
     """
     supported_methods = {
         "Basic",
@@ -818,20 +1712,28 @@ def lobpcg(A, X0, nev,
             f"Expected one of {sorted(supported_methods)}."
         )
 
-    if B is not None:
-        raise NotImplementedError(
-            "Generalized LOBPCG problems with B are not implemented yet."
-        )
-
     if method == "BLOPEX":
-        return blopex_lobpcg_standard_impl_(
+        if B is None:
+            return blopex_lobpcg_standard_impl_(
+                A,
+                X0,
+                nev,
+                T=T,
+                itmax=itmax,
+                tol=tol,
+                A_products=A_products,
+            )
+
+        return blopex_lobpcg_generalized_impl_(
             A,
+            B,
             X0,
             nev,
             T=T,
             itmax=itmax,
             tol=tol,
             A_products=A_products,
+            B_products=B_products,
         )
 
     raise NotImplementedError(

@@ -46,6 +46,34 @@ def _diagonal_problem():
     )
 
 
+def _generalized_diagonal_problem(n=12, m=2, seed=42):
+    """Return a generalized SPD problem A x = lambda B x.
+
+    A and B are diagonal, with known generalized eigenvalues
+
+        lambda_i = A_ii / B_ii = i + 1.
+    """
+    generalized_eigenvalues = np.arange(1.0, n + 1.0)
+
+    # Positive diagonal entries ensure that B is SPD.
+    b_diagonal = np.linspace(1.0, 2.0, n)
+
+    B_np = np.diag(b_diagonal)
+    A_np = np.diag(generalized_eigenvalues * b_diagonal)
+
+    rng = np.random.default_rng(seed)
+    X0_np = rng.normal(size=(n, m))
+
+    return (
+        A_np,
+        B_np,
+        X0_np,
+        _dense(A_np),
+        _dense(B_np),
+        _dense(X0_np),
+    )
+
+
 def test_lobpcg_dispatches_to_blopex(monkeypatch):
     A = object()
     X0 = object()
@@ -109,6 +137,78 @@ def test_lobpcg_dispatches_to_blopex(monkeypatch):
     }
 
 
+def test_lobpcg_dispatches_to_generalized_blopex(monkeypatch):
+    A = object()
+    B = object()
+    X0 = object()
+    T = object()
+
+    expected = (
+        np.array([1.0, 2.0]),
+        object(),
+        np.zeros((2, 3)),
+    )
+
+    received = {}
+
+    def fake_blopex(
+        A_arg,
+        B_arg,
+        X0_arg,
+        nev_arg,
+        *,
+        T=None,
+        itmax=200,
+        tol=1e-6,
+        A_products="implicit",
+        B_products="implicit",
+    ):
+        received["A"] = A_arg
+        received["B"] = B_arg
+        received["X0"] = X0_arg
+        received["nev"] = nev_arg
+        received["T"] = T
+        received["itmax"] = itmax
+        received["tol"] = tol
+        received["A_products"] = A_products
+        received["B_products"] = B_products
+
+        return expected
+
+    monkeypatch.setattr(
+        solver,
+        "blopex_lobpcg_generalized_impl_",
+        fake_blopex,
+    )
+
+    result = solver.lobpcg(
+        A,
+        X0,
+        2,
+        B=B,
+        T=T,
+        itmax=57,
+        tol=1e-9,
+        method="BLOPEX",
+        A_products="explicit",
+        B_products="explicit",
+    )
+
+    assert result is expected
+
+    assert received == {
+        "A": A,
+        "B": B,
+        "X0": X0,
+        "nev": 2,
+        "T": T,
+        "itmax": 57,
+        "tol": 1e-9,
+        "A_products": "explicit",
+        "B_products": "explicit",
+    }
+
+
 def test_blopex_finds_smallest_eigenvalues():
     A_np, _, A, X0 = _diagonal_problem()
 
@@ -148,6 +248,52 @@ def test_blopex_finds_smallest_eigenvalues():
     )
 
 
+def test_generalized_blopex_finds_smallest_eigenvalues():
+    A_np, B_np, _, A, B, X0 = _generalized_diagonal_problem()
+
+    Lambda, X, res = solver.lobpcg(
+        A,
+        X0,
+        nev=2,
+        B=B,
+        method="BLOPEX",
+        itmax=100,
+        tol=1e-6,
+        A_products="implicit",
+        B_products="implicit",
+    )
+
+    np.testing.assert_allclose(
+        Lambda,
+        np.array([1.0, 2.0]),
+        rtol=1e-5,
+        atol=1e-7,
+    )
+
+    X_np = _to_numpy(X)
+
+    # Check the generalized eigenvalue equation
+    #
+    #     A X = B X Lambda.
+    AX = A_np @ X_np
+    BX = B_np @ X_np
+
+    residual = AX - BX * Lambda.reshape(1, -1)
+
+    relative_residual = np.linalg.norm(residual, axis=0) / np.abs(Lambda)
+
+    assert np.all(relative_residual[:2] < 1e-6)
+
+    # Returned residual history should agree with a directly
+    # calculated generalized residual.
+    np.testing.assert_allclose(
+        res[:, -1],
+        relative_residual,
+        rtol=1e-5,
+        atol=1e-8,
+    )
+
+
 def test_blopex_returns_orthonormal_eigenvectors():
     _, _, A, X0 = _diagonal_problem()
 
@@ -164,6 +310,29 @@ def test_blopex_returns_orthonormal_eigenvectors():
 
     np.testing.assert_allclose(
         X_np.T @ X_np,
+        np.eye(len(Lambda)),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+
+
+def test_generalized_blopex_returns_b_orthonormal_eigenvectors():
+    _, B_np, _, A, B, X0 = _generalized_diagonal_problem()
+
+    Lambda, X, _ = solver.lobpcg(
+        A,
+        X0,
+        nev=2,
+        B=B,
+        method="BLOPEX",
+        itmax=100,
+        tol=1e-6,
+    )
+
+    X_np = _to_numpy(X)
+
+    np.testing.assert_allclose(
+        X_np.T @ B_np @ X_np,
         np.eye(len(Lambda)),
         rtol=1e-5,
         atol=1e-6,
@@ -194,6 +363,50 @@ def test_blopex_supports_nev_smaller_than_block_size():
     )
 
     # BLOPEX keeps m Ritz values/vectors internally.
+    assert Lambda.shape == (m,)
+    assert X.shape == (n, m)
+    assert res.shape[0] == m
+
+    # Only the first nev eigenpairs are required to converge.
+    np.testing.assert_allclose(
+        Lambda[:nev],
+        np.array([1.0, 2.0]),
+        rtol=1e-5,
+        atol=1e-7,
+    )
+
+    assert np.all(res[:nev, -1] < 1e-6)
+
+
+def test_generalized_blopex_supports_nev_smaller_than_block_size():
+    n = 12
+    m = 3
+    nev = 2
+
+    (
+        _,
+        _,
+        _,
+        A,
+        B,
+        X0,
+    ) = _generalized_diagonal_problem(
+        n=n,
+        m=m,
+        seed=123,
+    )
+
+    Lambda, X, res = solver.lobpcg(
+        A,
+        X0,
+        nev=nev,
+        B=B,
+        method="BLOPEX",
+        itmax=100,
+        tol=1e-6,
+    )
+
+    # BLOPEX keeps all m Ritz vectors internally.
     assert Lambda.shape == (m,)
     assert X.shape == (n, m)
     assert res.shape[0] == m
@@ -412,14 +625,107 @@ def test_blopex_implicit_matches_explicit():
     )
 
 
-def test_lobpcg_rejects_generalized_problem():
-    A = object()
-    X0 = object()
-    B = object()
+@pytest.mark.parametrize(
+    ("A_products", "B_products"),
+    [
+        ("implicit", "implicit"),
+        ("implicit", "explicit"),
+        ("explicit", "implicit"),
+        ("explicit", "explicit"),
+    ],
+)
+def test_generalized_blopex_product_modes_are_correct(
+    A_products,
+    B_products,
+):
+    _, _, _, A, B, X0 = _generalized_diagonal_problem()
+
+    Lambda, _, res = solver.lobpcg(
+        A,
+        X0,
+        nev=2,
+        B=B,
+        method="BLOPEX",
+        itmax=100,
+        tol=1e-6,
+        A_products=A_products,
+        B_products=B_products,
+    )
+
+    np.testing.assert_allclose(
+        Lambda,
+        np.array([1.0, 2.0]),
+        rtol=1e-5,
+        atol=1e-7,
+    )
+
+    assert np.all(res[:2, -1] < 1e-6)
+
+
+def test_generalized_blopex_implicit_matches_explicit():
+    _, B_np, _, A, B, X0 = _generalized_diagonal_problem()
+
+    Lambda_implicit, X_implicit, _ = solver.lobpcg(
+        A,
+        X0,
+        nev=2,
+        B=B,
+        method="BLOPEX",
+        itmax=100,
+        tol=1e-6,
+        A_products="implicit",
+        B_products="implicit",
+    )
+
+    Lambda_explicit, X_explicit, _ = solver.lobpcg(
+        A,
+        X0,
+        nev=2,
+        B=B,
+        method="BLOPEX",
+        itmax=100,
+        tol=1e-6,
+        A_products="explicit",
+        B_products="explicit",
+    )
+
+    np.testing.assert_allclose(
+        Lambda_implicit,
+        Lambda_explicit,
+        rtol=1e-6,
+        atol=1e-8,
+    )
+
+    X_implicit = _to_numpy(X_implicit)
+    X_explicit = _to_numpy(X_explicit)
+
+    # Transform the B-orthonormal eigenvectors into an ordinary
+    # Euclidean-orthonormal basis.
+    B_sqrt = np.diag(np.sqrt(np.diag(B_np)))
+
+    Y_implicit = B_sqrt @ X_implicit
+    Y_explicit = B_sqrt @ X_explicit
+
+    # Eigenvector signs are arbitrary, so compare invariant
+    # subspace projectors.
+    projector_implicit = Y_implicit @ Y_implicit.T
+
+    projector_explicit = Y_explicit @ Y_explicit.T
+
+    np.testing.assert_allclose(
+        projector_implicit,
+        projector_explicit,
+        rtol=1e-5,
+        atol=1e-6,
+    )
+
+
+def test_generalized_blopex_rejects_invalid_b_products():
+    _, _, _, A, B, X0 = _generalized_diagonal_problem()
 
     with pytest.raises(
-        NotImplementedError,
-        match="Generalized LOBPCG",
+        ValueError,
+        match="B_products",
     ):
         solver.lobpcg(
             A,
@@ -427,6 +733,7 @@ def test_lobpcg_rejects_generalized_problem():
             nev=2,
             B=B,
             method="BLOPEX",
+            B_products="wrong",
         )
 
 
