@@ -130,7 +130,7 @@ void init_matrix(py::module_ &module, const std::string matrix_type,
                     auto rows = shape_t[0].cast<size_t>();
                     auto cols = shape_t[1].cast<size_t>();
 
-                    auto data_obj = obj.attr("data");
+                    py::object data_obj = obj.attr("data");
                     py::object col_obj;
                     py::object row_obj;
 
@@ -158,85 +158,17 @@ void init_matrix(py::module_ &module, const std::string matrix_type,
                         row_obj = obj.attr("row");
                     }
 
-#ifdef GINKGO_BUILD_CUDA
-                    if (py::hasattr(data_obj,
-                                    "__cuda_array_interface__") &&
-                        std::dynamic_pointer_cast<
-                            const gko::CudaExecutor>(exec)) {
-                        // Validate dtypes before creating views to
-                        // avoid silent memory reinterpretation.
-                        auto expected_val =
-                            get_cuda_array_typestr<ValueType>();
-                        auto expected_idx =
-                            get_cuda_array_typestr<IndexType>();
-                        auto check_typestr = [](py::object arr,
-                                                const std::string &expected,
-                                                const char *name) {
-                            auto cai =
-                                arr.attr("__cuda_array_interface__")
-                                    .cast<py::dict>();
-                            auto typestr =
-                                cai["typestr"].cast<std::string>();
-                            if (typestr != expected) {
-                                throw std::runtime_error(
-                                    std::string("dtype mismatch for ") +
-                                    name +
-                                    ": __cuda_array_interface__ reports '" +
-                                    typestr + "' but expected '" +
-                                    expected + "'");
-                            }
-                        };
-                        check_typestr(data_obj, expected_val, "data");
-                        check_typestr(col_obj, expected_idx, "col_idxs");
-                        check_typestr(row_obj, expected_idx, "row_component");
-                        auto [vals_ptr, nnz] =
-                            cai_ptr_and_size<ValueType>(data_obj);
-                        auto [cols_ptr, cols_n] =
-                            cai_ptr_and_size<IndexType>(col_obj);
-                        auto [rows_ptr, rows_n] =
-                            cai_ptr_and_size<IndexType>(row_obj);
-
-                        return gko::share(
-                            MatrixType<ValueType, IndexType>::create(
-                                exec, gko::dim<2>{rows, cols},
-                                gko::array<ValueType>::view(
-                                    exec, nnz, vals_ptr),
-                                gko::array<IndexType>::view(
-                                    exec, cols_n, cols_ptr),
-                                gko::array<IndexType>::view(
-                                    exec, rows_n, rows_ptr)));
-                    }
-#endif
-                    // Fallback: copy via buffer protocol
-                    auto data_buf =
-                        py::array_t<ValueType,
-                                    py::array::c_style |
-                                        py::array::forcecast>(data_obj);
-                    auto cols_buf =
-                        py::array_t<IndexType,
-                                    py::array::c_style |
-                                        py::array::forcecast>(col_obj);
-                    auto rows_buf =
-                        py::array_t<IndexType,
-                                    py::array::c_style |
-                                        py::array::forcecast>(row_obj);
-
-                    auto ref = gko::ReferenceExecutor::create();
-                    py::buffer_info di = data_buf.request();
-                    py::buffer_info ci = cols_buf.request();
-                    py::buffer_info ri = rows_buf.request();
-
-                    auto dv = gko::array<ValueType>::view(
-                        ref, di.shape[0], (ValueType *)di.ptr);
-                    auto cv = gko::array<IndexType>::view(
-                        ref, ci.shape[0], (IndexType *)ci.ptr);
-                    auto rv = gko::array<IndexType>::view(
-                        ref, ri.shape[0], (IndexType *)ri.ptr);
+                    auto data_arr =
+                        gko_array_from_pyobject<ValueType>(exec, data_obj);
+                    auto col_arr =
+                        gko_array_from_pyobject<IndexType>(exec, col_obj);
+                    auto row_arr =
+                        gko_array_from_pyobject<IndexType>(exec, row_obj);
 
                     return gko::share(
                         MatrixType<ValueType, IndexType>::create(
                             exec, gko::dim<2>{rows, cols},
-                            dv, cv, rv));
+                            data_arr, col_arr, row_arr));
                 }),
                 py::keep_alive<1, 3>())
             .def("__repr__",
