@@ -40,6 +40,67 @@ def _right_multiply(X, C, out, beta=0.0):
     else:
         X.apply(1.0, C_gko, beta, out)
 
+def _right_solve_cholesky_factor(
+    X,
+    L,
+    work,
+    transpose,
+):
+    """Apply the Cholesky basis transformation using a direct solve.
+
+    Solve
+
+        L @ Y = X.T
+
+    and update
+
+        X <- Y.T.
+
+    This is mathematically equivalent to
+
+        X <- X @ inv(L.T),
+
+    but does not explicitly form the inverse.
+    """
+    n, m = tuple(X.shape)
+
+    if L.shape != (m, m):
+        raise ValueError(
+            f"L must have shape {(m, m)}, got {L.shape}."
+        )
+
+    if tuple(work.shape) != (n, m):
+        raise ValueError(
+            f"work must have shape {(n, m)}, got {tuple(work.shape)}."
+        )
+
+    if tuple(transpose.shape) != (m, n):
+        raise ValueError(
+            f"transpose must have shape {(m, n)}, "
+            f"got {tuple(transpose.shape)}."
+        )
+
+    # Copy X.T to the host.
+    X.transpose_into(transpose)
+
+    X_transpose = np.array(
+        transpose.copy_to_host(),
+        copy=True,
+    ).reshape(m, n)
+
+    # Solve L @ Y = X.T instead of explicitly constructing inv(L.T).
+    X_transpose = np.linalg.solve(
+        L,
+        X_transpose,
+    )
+
+    work.copy_from(
+        type(X)(
+            X.get_executor(),
+            np.ascontiguousarray(X_transpose.T),
+        )
+    )
+    X.copy_from(work)
 
 def _orthonormalize_blopex_standard(
     W,
@@ -54,10 +115,13 @@ def _orthonormalize_blopex_standard(
 
         G = W.T @ W = L @ L.T,
 
-    compute
+    update W by solving
 
-        C = inv(L.T)
-        W <- W @ C.
+        L @ Y = W.T
+        W <- Y.T.
+
+    This is equivalent to W <- W @ inv(L.T), but avoids explicitly
+    forming the inverse.
 
     If AW is provided, apply the same transformation to AW so that it
     remains consistent with W. This is required for implicit A-products.
@@ -109,27 +173,26 @@ def _orthonormalize_blopex_standard(
             "Cholesky orthonormalization."
         ) from error
 
-    # Reference implementation:
+    # Apply W <- W @ inv(L.T) without forming the inverse.
     #
-    #   U = cholesky(W.T @ W, lower=False)
-    #   W = W @ inv(U)
+    # Solve
     #
-    # NumPy gives G = L @ L.T, so U = L.T.
-    transform = np.linalg.solve(
-        L.T,
-        np.eye(m, dtype=G.dtype),
+    #     L @ Y = W.T
+    #
+    # and set W <- Y.T.
+    _right_solve_cholesky_factor(
+        W,
+        L,
+        work,
+        transpose,
     )
-
-    _right_multiply(W, transform, work)
-    W.copy_from(work)
-
-    # If AW = A @ W was already available, transform it with exactly
-    # the same right factor:
-    #
-    #   AW_new = AW_old @ transform.
     if AW is not None:
-        _right_multiply(AW, transform, work)
-        AW.copy_from(work)
+        _right_solve_cholesky_factor(
+            AW,
+            L,
+            work,
+            transpose,
+        )
 
 def _orthonormalize_blopex_generalized(
     W,
@@ -145,29 +208,19 @@ def _orthonormalize_blopex_generalized(
 
     Given BW = B @ W, form
 
-        G = W.T @ BW.
+        G = W.T @ BW = L @ L.T.
 
-    With
+    Update W by solving
 
-        G = L @ L.T,
+        L @ Y = W.T
+        W <- Y.T.
 
-    compute
+    This is equivalent to W <- W @ inv(L.T), but avoids explicitly
+    forming the inverse.
 
-        C = inv(L.T)
-        W <- W @ C.
+    If ``update_BW`` is True, apply the same transformation to BW.
 
-    Then
-
-        W.T @ B @ W = I.
-
-    If ``update_BW`` is True, BW is transformed with the same
-    right factor:
-
-        BW <- BW @ C.
-
-    If AW is supplied, it is also transformed:
-
-        AW <- AW @ C.
+    If AW is supplied, apply the same transformation to AW.
 
     Updating AW is required when A-products are maintained implicitly.
     """
@@ -221,43 +274,35 @@ def _orthonormalize_blopex_generalized(
             "or B is not positive definite."
         ) from error
 
-    # G = L L.T.
+    # Apply W <- W @ inv(L.T) without forming the inverse.
     #
-    # We want C such that
+    # Solve
     #
-    #     C.T G C = I.
+    #     L @ Y = W.T
     #
-    # Therefore C = inv(L.T).
-    transform = np.linalg.solve(
-        L.T,
-        np.eye(m, dtype=G.dtype),
-    )
-
-    # W <- W @ transform.
-    _right_multiply(
+    # and set W <- Y.T.
+    _right_solve_cholesky_factor(
         W,
-        transform,
+        L,
         work,
+        transpose,
     )
-    W.copy_from(work)
 
     if update_BW:
-        # BW <- BW @ transform.
-        _right_multiply(
+        _right_solve_cholesky_factor(
             BW,
-            transform,
+            L,
             work,
+            transpose,
         )
-        BW.copy_from(work)
 
     if AW is not None:
-        # AW <- AW @ transform.
-        _right_multiply(
+        _right_solve_cholesky_factor(
             AW,
-            transform,
+            L,
             work,
+            transpose,
         )
-        AW.copy_from(work)
 
 
 def _rayleigh_ritz_blopex_standard(
@@ -890,7 +935,7 @@ def blopex_lobpcg_standard_impl_(
     #   X = X0
     #   XtX = X.T @ X
     #   U = chol(XtX)
-    #   X = X @ inv(U)
+    #   X = solve(U.T, X.T).T
     #
     #   AX = A @ X
     #   hX, Lambda = RR6(X, AX)
@@ -969,7 +1014,7 @@ def blopex_lobpcg_standard_impl_(
         #
         #   ZtZ = Z.T @ Z
         #   U = chol(ZtZ)
-        #   Z = Z @ inv(U)
+        #   Z = solve(U.T, Z.T).T
         #
         _orthonormalize_blopex_standard(
             Z,
@@ -1029,10 +1074,10 @@ def blopex_lobpcg_standard_impl_(
             #
             #   PtP = P.T @ P
             #   U = chol(PtP)
-            #   P = P @ inv(U)
+            #   P = solve(U.T, P.T).T
             #
             #   if implicit:
-            #       AP = AP @ inv(U)
+            #       AP = solve(U.T, AP.T).T
             #   else:
             #       AP = A @ P
             # ==========================================================
@@ -1296,10 +1341,10 @@ def blopex_lobpcg_generalized_impl_(
     #   BX = B @ X
     #   XtBX = X.T @ BX
     #   U = chol(XtBX)
-    #   X = X @ inv(U)
+    #   X = solve(U.T, X.T).T
     #
     #   if B_products == "implicit":
-    #       BX = BX @ inv(U)
+    #       BX = solve(U.T, BX.T).T
     #   else:
     #       BX = B @ X
     #
@@ -1409,7 +1454,7 @@ def blopex_lobpcg_generalized_impl_(
         #   BZ = B @ Z
         #   ZtBZ = Z.T @ BZ
         #   U = chol(ZtBZ)
-        #   Z = Z @ inv(U)
+        #   Z = solve(U.T, Z.T).T
         # --------------------------------------------------------------
 
         B.apply(Z, BZ)
@@ -1485,10 +1530,15 @@ def blopex_lobpcg_generalized_impl_(
             #
             #   PtBP = P.T @ BP
             #   U = chol(PtBP)
-            #   P = P @ inv(U)
+            #   P = solve(U.T, P.T).T
             #
             # The corresponding AP / BP products have to undergo
             # exactly the same transformation in implicit mode.
+            #   if A_products == "implicit":
+            #       AP = solve(U.T, AP.T).T
+            #
+            #   if B_products == "implicit":
+            #       BP = solve(U.T, BP.T).T
             # ==========================================================
 
             _orthonormalize_blopex_generalized(
