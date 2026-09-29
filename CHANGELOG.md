@@ -1,4 +1,5 @@
 # Version 0.1.0 (unreleased)
+- Add Ginkgo MPI bindings [#123](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/123)
 - Add generic Python wrappers and tests [#113](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/113)
 - Fix issue #94 Python helper API and tests [#111](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/111)
 - Add CG solver binding and tests [#109](https://github.com/Helmholtz-AI-Energy/pyGinkgo/pull/109)
