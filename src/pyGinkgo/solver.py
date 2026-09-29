@@ -847,7 +847,7 @@ def blopex_lobpcg_standard_impl_(
         A          : left  hand-side operator, symmetric positive definite, n-by-n
         X0         : initial iterates, n-by-m (m < n)
         nev        : number of wanted eigenpairs, nev <= m
-        T          : precondontioner, symmetric positive definite, n-by-n
+        T          : preconditioner, symmetric positive definite, n-by-n
         itmax      : maximum number of iterations
         tol        : tolerance used for convergence criterion
         A_products : if :implicit, the matrix products with A are updated implicitly
@@ -1244,7 +1244,7 @@ def blopex_lobpcg_generalized_impl_(
     B          : right hand-side operator, symmetric positive definite, n-by-n
     X0         : initial iterates, n-by-m (m < n)
     nev        : number of wanted eigenpairs, nev <= m
-    T          : precondontioner, symmetric positive definite, n-by-n
+    T          : preconditioner, symmetric positive definite, n-by-n
     itmax      : maximum number of BLOPEX iterations
     tol        : tolerance used for convergence criterion
     A_products : If "implicit", update A-products using the small Ritz
