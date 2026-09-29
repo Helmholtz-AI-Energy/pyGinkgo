@@ -184,6 +184,19 @@ static gko::array<T> array_on_exec(std::shared_ptr<const gko::Executor> exec,
 {
 #ifdef GINKGO_BUILD_CUDA
     if (py::hasattr(obj, "__cuda_array_interface__")) {
+        // The reported pointer is a CUDA device address, so only a
+        // CudaExecutor may view or copy from it. Registering it on a
+        // Reference/OMP/HIP executor would make Ginkgo treat device memory as
+        // host memory (a plain memcpy from an unmapped address), so reject the
+        // combination here instead of dereferencing it. Mirrors the guard in
+        // vector_local_device_info for the opposite direction.
+        if (!std::dynamic_pointer_cast<const gko::CudaExecutor>(exec)) {
+            throw py::value_error(
+                std::string(name) +
+                " is a __cuda_array_interface__ device array, which is only "
+                "supported on a CUDA executor; copy it to the host (e.g. "
+                "cupy.asnumpy) or use a CudaExecutor.");
+        }
         auto ptr_size = cai_ptr_and_size<T>(obj);
         auto view = gko::array<T>::view(exec, ptr_size.second, ptr_size.first);
         return gko::array<T>{exec, view};
@@ -315,7 +328,7 @@ static py::array_t<ValueType> vector_local(std::shared_ptr<gko::LinOp> v)
         py::array_t<ValueType> out(nrows);
         auto *out_data = static_cast<ValueType *>(out.request().ptr);
         for (py::ssize_t row = 0; row < nrows; ++row) {
-            out_data[row] = values[row];
+            out_data[row] = values[row * stride];
         }
         return out;
     }
@@ -324,7 +337,7 @@ static py::array_t<ValueType> vector_local(std::shared_ptr<gko::LinOp> v)
     auto *out_data = static_cast<ValueType *>(out.request().ptr);
     for (py::ssize_t col = 0; col < ncols; ++col) {
         for (py::ssize_t row = 0; row < nrows; ++row) {
-            out_data[row * ncols + col] = values[row + col * stride];
+            out_data[row * ncols + col] = values[row * stride + col];
         }
     }
     return out;

@@ -556,3 +556,90 @@ class TestDeviceBuffer:
 
         with pytest.raises(AttributeError, match="CUDA executors"):
             dist.vector_local(vec, dtype=dtype, on_device=True)
+
+
+# --------------------------------------------------------------------------- #
+#  Device array handed to a non-CUDA executor
+# --------------------------------------------------------------------------- #
+class _FakeDeviceArray:
+    """Minimal ``__cuda_array_interface__`` producer.
+
+    The pointer is never dereferenced: array_on_exec rejects the executor
+    before touching it, which is exactly what these tests assert.  Using a stub
+    instead of a real CuPy array means the check is covered on CI machines that
+    have a CUDA-enabled build but no GPU.
+    """
+
+    def __init__(self, n, typestr):
+        self.__cuda_array_interface__ = {
+            "shape": (n,),
+            "typestr": typestr,
+            "data": (0xDEADBEEF, False),
+            "strides": None,
+            "version": 3,
+        }
+
+
+@requires_dist
+class TestDeviceArrayOnHostExecutor:
+    """A CUDA device pointer must never be viewed as host memory.
+
+    Ginkgo would memcpy from an unmapped address and segfault, so the bindings
+    have to raise instead.  Only the CUDA binding needs to be compiled in, not a
+    device present.
+    """
+
+    _TYPESTR = {"float": "<f4", "double": "<f8"}
+
+    @pytest.mark.parametrize("dtype", ["float", "double"])
+    def test_vector_set_local_rejects_device_array_on_cpu_executor(self, comm, dtype):
+        if not _has_device_binding(dtype):
+            pytest.skip("build has no CUDA support compiled in")
+
+        executor = pGB.ReferenceExecutor()
+        N, size = 12, comm.Get_size()
+        owners, start, end = _block_distribution(N, comm)
+        part = dist.build_partition(executor, owners, size)
+        owned = np.arange(start, end, dtype=np.int32)
+        vec = dist.vector(
+            executor,
+            comm,
+            part,
+            owned,
+            np.zeros(owned.size, dtype=_NP_DTYPE[dtype]),
+            N,
+            dtype=dtype,
+        )
+
+        bad = _FakeDeviceArray(owned.size, self._TYPESTR[dtype])
+        with pytest.raises(ValueError, match="only supported on a CUDA executor"):
+            dist.vector_set_local(vec, bad, dtype=dtype)
+
+    @pytest.mark.parametrize("dtype", ["float", "double"])
+    def test_vector_rejects_device_values_on_cpu_executor(self, comm, dtype):
+        if not _has_device_binding(dtype):
+            pytest.skip("build has no CUDA support compiled in")
+
+        executor = pGB.ReferenceExecutor()
+        N, size = 12, comm.Get_size()
+        owners, start, end = _block_distribution(N, comm)
+        part = dist.build_partition(executor, owners, size)
+        owned = np.arange(start, end, dtype=np.int32)
+
+        bad = _FakeDeviceArray(owned.size, self._TYPESTR[dtype])
+        with pytest.raises(ValueError, match="only supported on a CUDA executor"):
+            dist.vector(executor, comm, part, owned, bad, N, dtype=dtype)
+
+    def test_matrix_rejects_device_indices_on_cpu_executor(self, comm):
+        if not _has_device_binding("double"):
+            pytest.skip("build has no CUDA support compiled in")
+
+        executor = pGB.ReferenceExecutor()
+        N, size = 12, comm.Get_size()
+        owners, start, end = _block_distribution(N, comm)
+        part = dist.build_partition(executor, owners, size)
+        rows, cols, vals = _laplacian_triplets(start, end, N, np.float64)
+
+        bad_rows = _FakeDeviceArray(rows.size, "<i4")
+        with pytest.raises(ValueError, match="only supported on a CUDA executor"):
+            dist.matrix(executor, comm, part, bad_rows, cols, vals, N, dtype="double")
