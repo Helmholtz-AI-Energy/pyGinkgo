@@ -47,6 +47,17 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "develop-mpi",
+      "inherits": [
+        "develop"
+      ],
+      "displayName": "Build pyGinkgo bindings in develop mode with MPI",
+      "description": "Like 'develop', but with Ginkgo's MPI backend enabled so the pyGinkgo.distributed bindings are compiled and their tests run. Requires an MPI installation and mpi4py.",
+      "cacheVariables": {
+        "GINKGO_BUILD_MPI": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -67,6 +78,12 @@
       "displayName": "Build for CPUs only with unit tests enabled",
       "configurePreset": "release",
       "configuration": "release"
+    },
+    {
+      "name": "develop-mpi",
+      "displayName": "Build for CPUs only with MPI and unit tests enabled",
+      "configurePreset": "develop-mpi",
+      "configuration": "develop"
     }
    ],
   "testPresets": [
@@ -80,6 +97,12 @@
       "name": "develop",
       "displayName": "Build for CPUs only with unit tests enabled",
       "configurePreset": "develop",
+      "configuration": "develop"
+    },
+    {
+      "name": "develop-mpi",
+      "displayName": "Build for CPUs only with MPI and unit tests enabled",
+      "configurePreset": "develop-mpi",
       "configuration": "develop"
     }
   ]

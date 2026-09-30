@@ -52,6 +52,15 @@ Issues= "https://github.com/Helmholtz-AI-Energy/pyGinkgo/issues"
 test = [
     "pytest",
 ]
+# Only needed to exercise the pyGinkgo.distributed bindings, and only useful in
+# a build with GINKGO_BUILD_MPI=ON. Kept out of `test` because installing
+# mpi4py requires an MPI toolchain. Install it against the same MPI that Ginkgo
+# was built with (`pip install --no-binary=mpi4py pyGinkgo[mpi]`): pyGinkgo
+# passes an mpi4py MPI_Comm handle straight to Ginkgo, so the two must share an
+# MPI implementation.
+mpi = [
+    "mpi4py",
+]
 
 [tool.cibuildwheel]
 # CPython only; skip PyPy, musl, 32-bit and the legacy manylinux i686 targets.
