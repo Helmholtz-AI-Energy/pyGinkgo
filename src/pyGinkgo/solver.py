@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 from pyGinkgo import pyGinkgoBindings as pGB
+from .pyGinkgoBindings.solver import *
 import pyGinkgo as pg
 from . import gko_types
 import numpy as np
