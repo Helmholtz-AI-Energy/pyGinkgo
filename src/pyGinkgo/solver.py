@@ -7,6 +7,7 @@ from .pyGinkgoBindings.solver import *
 import pyGinkgo as pg
 from . import gko_types
 import numpy as np
+from scipy.linalg import solve_triangular
 
 def _right_multiply(X, C, out, beta=0.0):
     """Compute out = X @ C + beta * out.
@@ -41,67 +42,66 @@ def _right_multiply(X, C, out, beta=0.0):
     else:
         X.apply(1.0, C_gko, beta, out)
 
-def _right_solve_cholesky_factor(
-    X,
+def _apply_cholesky_transform(
+    blocks,
     L,
     work,
-    transpose,
+    *,
+    dtype=None,
 ):
-    """Apply the Cholesky basis transformation using a direct solve.
+    """Apply a shared Cholesky transform to executor-local blocks.
 
-    Solve
+    Given the lower-triangular factor L of G = L @ L.T, form
+    C = L**(-T) by solving L @ C.T = I on the host. Construct C
+    on work's executor once, then update each block as
+    block <- block @ C using the reusable work buffer.
 
-        L @ Y = X.T
+    All blocks and work must have shape (n, m) and use the same
+    executor and value type. work must not alias any input block.
+    dtype selects C's storage dtype after the triangular solve.
 
-    and update
-
-        X <- Y.T.
-
-    This is mathematically equivalent to
-
-        X <- X @ inv(L.T),
-
-    but does not explicitly form the inverse.
+    Only m-by-m arrays are processed on the host; no n-by-m block
+    is transferred to the host. This explicitly forms the inverse
+    triangular factor.
     """
-    n, m = tuple(X.shape)
+    blocks = tuple(blocks)
+    n, m = tuple(work.shape)
 
     if L.shape != (m, m):
         raise ValueError(
             f"L must have shape {(m, m)}, got {L.shape}."
         )
 
-    if tuple(work.shape) != (n, m):
-        raise ValueError(
-            f"work must have shape {(n, m)}, got {tuple(work.shape)}."
-        )
+    for block in blocks:
+        if tuple(block.shape) != (n, m):
+            raise ValueError(
+                f"Each block must have shape {(n, m)}, "
+                f"got {tuple(block.shape)}."
+            )
+        if block is work:
+            raise ValueError(
+                "work must be distinct from the input blocks."
+            )
 
-    if tuple(transpose.shape) != (m, n):
-        raise ValueError(
-            f"transpose must have shape {(m, n)}, "
-            f"got {tuple(transpose.shape)}."
-        )
-
-    # Copy X.T to the host.
-    X.transpose_into(transpose)
-
-    X_transpose = np.array(
-        transpose.copy_to_host(),
-        copy=True,
-    ).reshape(m, n)
-
-    # Solve L @ Y = X.T instead of explicitly constructing inv(L.T).
-    X_transpose = np.linalg.solve(
+    # Only m-by-m arrays are involved in this CPU solve.
+    C = solve_triangular(
         L,
-        X_transpose,
+        np.eye(m, dtype=L.dtype),
+        lower=True,
+    ).T
+
+    C = np.ascontiguousarray(C, dtype=dtype)
+
+    # Construct/upload the small coefficient matrix once.
+    C_gko = type(work)(
+        work.get_executor(),
+        C,
     )
 
-    work.copy_from(
-        type(X)(
-            X.get_executor(),
-            np.ascontiguousarray(X_transpose.T),
-        )
-    )
-    X.copy_from(work)
+    # Large blocks remain on their existing executor.
+    for block in blocks:
+        block.apply(C_gko, work)
+        block.copy_from(work)
 
 def _orthonormalize_blopex_standard(
     W,
@@ -112,20 +112,16 @@ def _orthonormalize_blopex_standard(
 ):
     """Cholesky-orthonormalize a BLOPEX block.
 
-    For
+    Form G = W.T @ W on the executor and factor G = L @ L.T
+    on the host. Construct C = L**(-T) using a small triangular
+    solve and update W <- W @ C on the executor.
 
-        G = W.T @ W = L @ L.T,
+    If AW is provided, also update AW <- AW @ C to preserve
+    AW = A @ W.
 
-    update W by solving
-
-        L @ Y = W.T
-        W <- Y.T.
-
-    This is equivalent to W <- W @ inv(L.T), but avoids explicitly
-    forming the inverse.
-
-    If AW is provided, apply the same transformation to AW so that it
-    remains consistent with W. This is required for implicit A-products.
+    W, AW, and all workspaces must use the same executor.
+    Only m-by-m matrices cross between the host and executor;
+    the n-by-m blocks remain on their executor.
     """
     n, m = tuple(W.shape)
 
@@ -158,6 +154,7 @@ def _orthonormalize_blopex_standard(
         gram.copy_to_host(),
         copy=True,
     ).reshape(m, m)
+    block_dtype = G.dtype
 
     # Remove tiny loss of symmetry from floating-point operations.
     G = 0.5 * (G + G.T)
@@ -174,26 +171,17 @@ def _orthonormalize_blopex_standard(
             "Cholesky orthonormalization."
         ) from error
 
-    # Apply W <- W @ inv(L.T) without forming the inverse.
-    #
-    # Solve
-    #
-    #     L @ Y = W.T
-    #
-    # and set W <- Y.T.
-    _right_solve_cholesky_factor(
-        W,
+    # Form the small transform C = L**(-T) on the host.
+    # Apply the same C to W and its supplied companion blocks
+    # on their executor, reusing the existing work buffer.
+    blocks = (W,) if AW is None else (W, AW)
+
+    _apply_cholesky_transform(
+        blocks,
         L,
         work,
-        transpose,
+        dtype=block_dtype,
     )
-    if AW is not None:
-        _right_solve_cholesky_factor(
-            AW,
-            L,
-            work,
-            transpose,
-        )
 
 def _orthonormalize_blopex_generalized(
     W,
@@ -205,25 +193,22 @@ def _orthonormalize_blopex_generalized(
     AW=None,
     update_BW=True,
 ):
-    """B-orthonormalize a BLOPEX block.
+    """B-orthonormalize a BLOPEX block, given BW = B @ W.
 
-    Given BW = B @ W, form
+    Form G = W.T @ BW on the executor and factor G = L @ L.T
+    on the host. Construct C = L**(-T) using a small triangular
+    solve and update W <- W @ C on the executor.
 
-        G = W.T @ BW = L @ L.T.
+    If update_BW is True, also update BW <- BW @ C to preserve
+    BW = B @ W. Otherwise, BW remains unchanged and the caller
+    must recompute it before reuse.
 
-    Update W by solving
+    If AW is provided, also update AW <- AW @ C to preserve
+    AW = A @ W.
 
-        L @ Y = W.T
-        W <- Y.T.
-
-    This is equivalent to W <- W @ inv(L.T), but avoids explicitly
-    forming the inverse.
-
-    If ``update_BW`` is True, apply the same transformation to BW.
-
-    If AW is supplied, apply the same transformation to AW.
-
-    Updating AW is required when A-products are maintained implicitly.
+    All blocks and workspaces must use the same executor.
+    Only m-by-m matrices cross between the host and executor;
+    the n-by-m blocks remain on their executor.
     """
     n, m = tuple(W.shape)
 
@@ -261,6 +246,7 @@ def _orthonormalize_blopex_generalized(
         gram.copy_to_host(),
         copy=True,
     ).reshape(m, m)
+    block_dtype = G.dtype
 
     G = 0.5 * (G + G.T)
 
@@ -275,35 +261,23 @@ def _orthonormalize_blopex_generalized(
             "or B is not positive definite."
         ) from error
 
-    # Apply W <- W @ inv(L.T) without forming the inverse.
-    #
-    # Solve
-    #
-    #     L @ Y = W.T
-    #
-    # and set W <- Y.T.
-    _right_solve_cholesky_factor(
-        W,
-        L,
-        work,
-        transpose,
-    )
+    # Form the small transform C = L**(-T) on the host.
+    # Apply the same C to W and its supplied companion blocks
+    # on their executor, reusing the existing work buffer.
+    blocks = (W,)
 
     if update_BW:
-        _right_solve_cholesky_factor(
-            BW,
-            L,
-            work,
-            transpose,
-        )
+        blocks += (BW,)
 
     if AW is not None:
-        _right_solve_cholesky_factor(
-            AW,
-            L,
-            work,
-            transpose,
-        )
+        blocks += (AW,)
+
+    _apply_cholesky_transform(
+        blocks,
+        L,
+        work,
+        dtype=block_dtype,
+    )
 
 
 def _rayleigh_ritz_blopex_standard(
