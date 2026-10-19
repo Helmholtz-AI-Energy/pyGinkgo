@@ -9,99 +9,85 @@ from . import gko_types
 import numpy as np
 from scipy.linalg import solve_triangular
 
-def _right_multiply(X, C, out, beta=0.0):
-    """Compute out = X @ C + beta * out.
+def _right_multiply(X, C, out, beta=0.0, *, one=None):
+    """Multiply by executor-local C into independent output storage."""
+    if tuple(C.shape)[0] != tuple(X.shape)[1]:
+        raise ValueError("Incompatible multiplication dimensions.")
 
-    X and out are executor-local Ginkgo Dense matrices.
-    C is a small host-side NumPy matrix.
-    """
-    rows, inner = tuple(X.shape)
-    C = np.asarray(C)
+    if tuple(out.shape) != (
+        tuple(X.shape)[0], tuple(C.shape)[1]
+    ):
+        raise ValueError("out has the wrong shape.")
 
-    if C.ndim != 2:
-        raise ValueError("C must be a two-dimensional matrix.")
-
-    if C.shape[0] != inner:
-        raise ValueError(
-            "C.shape[0] must match X.shape[1], "
-            f"got {C.shape[0]} and {inner}."
-        )
-
-    expected_out_shape = (rows, C.shape[1])
-    if tuple(out.shape) != expected_out_shape:
-        raise ValueError(
-            f"out must have shape {expected_out_shape}, "
-            f"got {tuple(out.shape)}."
-        )
-
-    C = np.ascontiguousarray(C)
-    C_gko = type(X)(X.get_executor(), C)
+    if X is out or C is out:
+        raise ValueError("out must be distinct from both inputs.")
 
     if beta == 0.0:
-        X.apply(C_gko, out)
+        X.apply(C, out)
+    elif beta == 1.0 and one is not None:
+        X.apply(one, C, one, out)
     else:
-        X.apply(1.0, C_gko, beta, out)
+        raise ValueError(
+            "Use beta=0, or beta=1 with one supplied."
+        )
 
 def _apply_cholesky_transform(
     blocks,
     L,
     work,
     *,
+    coefficient,
     dtype=None,
 ):
-    """Apply a shared Cholesky transform to executor-local blocks.
+    """Return (transformed_blocks, replacement_scratch).
 
-    Given the lower-triangular factor L of G = L @ L.T, form
-    C = L**(-T) by solving L @ C.T = I on the host. Construct C
-    on work's executor once, then update each block as
-    block <- block @ C using the reusable work buffer.
+    Form the small transform L**(-T) on the host and upload it
+    into the reusable coefficient buffer. Large blocks remain
+    on their executor.
 
-    All blocks and work must have shape (n, m) and use the same
-    executor and value type. work must not alias any input block.
-    dtype selects C's storage dtype after the triangular solve.
-
-    Only m-by-m arrays are processed on the host; no n-by-m block
-    is transferred to the host. This explicitly forms the inverse
-    triangular factor.
+    Blocks and work must be distinct independent allocations.
+    Callers must rebind all returned handles.
     """
     blocks = tuple(blocks)
     n, m = tuple(work.shape)
 
     if L.shape != (m, m):
+        raise ValueError(f"L must have shape {(m, m)}.")
+
+    if tuple(coefficient.shape) != (m, m):
         raise ValueError(
-            f"L must have shape {(m, m)}, got {L.shape}."
+            f"coefficient must have shape {(m, m)}."
         )
 
     for block in blocks:
         if tuple(block.shape) != (n, m):
             raise ValueError(
-                f"Each block must have shape {(n, m)}, "
-                f"got {tuple(block.shape)}."
-            )
-        if block is work:
-            raise ValueError(
-                "work must be distinct from the input blocks."
+                f"Each block must have shape {(n, m)}."
             )
 
-    # Only m-by-m arrays are involved in this CPU solve.
+    if len({id(block) for block in (*blocks, work)}) != (
+        len(blocks) + 1
+    ):
+        raise ValueError("Blocks and work must be distinct.")
+
     C = solve_triangular(
         L,
         np.eye(m, dtype=L.dtype),
         lower=True,
     ).T
 
-    C = np.ascontiguousarray(C, dtype=dtype)
-
-    # Construct/upload the small coefficient matrix once.
-    C_gko = type(work)(
-        work.get_executor(),
-        C,
+    coefficient.copy_from_numpy(
+        np.ascontiguousarray(C, dtype=dtype)
     )
 
-    # Large blocks remain on their existing executor.
+    updated = []
+
     for block in blocks:
-        block.apply(C_gko, work)
-        block.copy_from(work)
+        block.apply(coefficient, work)
+        updated.append(work)
+        work = block
+
+    return tuple(updated), work
 
 def _orthonormalize_blopex_standard(
     W,
@@ -109,19 +95,32 @@ def _orthonormalize_blopex_standard(
     transpose,
     gram,
     AW=None,
+    *,
+    coefficient,
 ):
     """Cholesky-orthonormalize a BLOPEX block.
 
     Form G = W.T @ W on the executor and factor G = L @ L.T
-    on the host. Construct C = L**(-T) using a small triangular
-    solve and update W <- W @ C on the executor.
+    on the host. Form C = L**(-T) by solving against the identity,
+    upload C into the reusable coefficient buffer, and compute
+    W_new = W @ C on the executor.
 
-    If AW is provided, also update AW <- AW @ C to preserve
-    AW = A @ W.
+    If AW is provided, also compute AW_new = AW @ C to preserve
+    AW_new = A @ W_new.
 
-    W, AW, and all workspaces must use the same executor.
+    All blocks and workspaces must use the same executor and
+    value type. W, work, and AW (if provided) must occupy distinct
+    storage. coefficient must have shape (m, m).
+
     Only m-by-m matrices cross between the host and executor;
     the n-by-m blocks remain on their executor.
+
+    Returns
+    -------
+    tuple
+        (W_new, AW_new, work_new), where AW_new is None when AW
+        is not provided. Buffers are recycled, so callers must
+        rebind all returned block and scratch handles.
     """
     n, m = tuple(W.shape)
 
@@ -176,11 +175,18 @@ def _orthonormalize_blopex_standard(
     # on their executor, reusing the existing work buffer.
     blocks = (W,) if AW is None else (W, AW)
 
-    _apply_cholesky_transform(
+    updated, work = _apply_cholesky_transform(
         blocks,
         L,
         work,
+        coefficient=coefficient,
         dtype=block_dtype,
+    )
+
+    return (
+        updated[0],
+        updated[1] if AW is not None else None,
+        work,
     )
 
 def _orthonormalize_blopex_generalized(
@@ -190,25 +196,37 @@ def _orthonormalize_blopex_generalized(
     transpose,
     gram,
     *,
+    coefficient,
     AW=None,
     update_BW=True,
 ):
     """B-orthonormalize a BLOPEX block, given BW = B @ W.
 
     Form G = W.T @ BW on the executor and factor G = L @ L.T
-    on the host. Construct C = L**(-T) using a small triangular
-    solve and update W <- W @ C on the executor.
+    on the host. Form C = L**(-T) by solving against the identity,
+    upload C into the reusable coefficient buffer, and compute
+    W_new = W @ C on the executor.
 
-    If update_BW is True, also update BW <- BW @ C to preserve
-    BW = B @ W. Otherwise, BW remains unchanged and the caller
-    must recompute it before reuse.
+    If update_BW is True, also compute BW_new = BW @ C to preserve
+    BW_new = B @ W_new. Otherwise, return BW unchanged; the caller
+    must recompute B @ W_new before reusing it.
 
-    If AW is provided, also update AW <- AW @ C to preserve
-    AW = A @ W.
+    If AW is provided, also compute AW_new = AW @ C to preserve
+    AW_new = A @ W_new.
 
-    All blocks and workspaces must use the same executor.
+    All blocks and workspaces must use the same executor and
+    value type. W, BW, work, and AW (if provided) must occupy
+    distinct storage. coefficient must have shape (m, m).
+
     Only m-by-m matrices cross between the host and executor;
     the n-by-m blocks remain on their executor.
+
+    Returns
+    -------
+    tuple
+        (W_new, BW_new, AW_new, work_new), where AW_new is None
+        when AW is not provided. Buffers are recycled, so callers
+        must rebind all returned block and scratch handles.
     """
     n, m = tuple(W.shape)
 
@@ -272,19 +290,110 @@ def _orthonormalize_blopex_generalized(
     if AW is not None:
         blocks += (AW,)
 
-    _apply_cholesky_transform(
+    updated, work = _apply_cholesky_transform(
         blocks,
         L,
         work,
+        coefficient=coefficient,
         dtype=block_dtype,
     )
+
+    it = iter(updated)
+    W = next(it)
+
+    if update_BW:
+        BW = next(it)
+
+    if AW is not None:
+        AW = next(it)
+
+    return W, BW, AW, work
+
+def _project_blopex_upper(
+    blocks, a_blocks, transpose, packed, *, b_blocks=None
+):
+    """Form symmetric H and G with one packed host-copy call."""
+    blocks = tuple(blocks)
+    a_blocks = tuple(a_blocks)
+    metric_blocks = (
+        blocks if b_blocks is None else tuple(b_blocks)
+    )
+
+    q = len(blocks)
+    if q == 0:
+        raise ValueError("blocks must not be empty.")
+
+    if len(a_blocks) != q or len(metric_blocks) != q:
+        raise ValueError(
+            "All block collections must have the same length."
+        )
+
+    n, m = tuple(blocks[0].shape)
+
+    if tuple(transpose.shape) != (m, n):
+        raise ValueError("transpose has the wrong shape.")
+
+    for collection in (blocks, a_blocks, metric_blocks):
+        if any(tuple(block.shape) != (n, m)
+               for block in collection):
+            raise ValueError("All blocks must have shape (n, m).")
+
+    products = q * (q + 1)
+    rows, cols = tuple(packed.shape)
+
+    if rows < products * m or cols != m:
+        raise ValueError("packed is too small.")
+
+    slot = 0
+
+    for i, left in enumerate(blocks):
+        left.transpose_into(transpose)
+
+        for j in range(i, q):
+            for right in (a_blocks[j], metric_blocks[j]):
+                target = packed.create_submatrix(
+                    slot * m, (slot + 1) * m, 0, m
+                )
+                transpose.apply(right, target)
+                slot += 1
+
+    used = packed.create_submatrix(
+        0, products * m, 0, m
+    )
+    host = np.array(
+        used.copy_to_host(), copy=True
+    ).reshape(products, m, m)
+
+    H = np.empty((q * m, q * m), dtype=host.dtype)
+    G = np.empty_like(H)
+    slot = 0
+
+    for i in range(q):
+        si = slice(i * m, (i + 1) * m)
+
+        for j in range(i, q):
+            sj = slice(j * m, (j + 1) * m)
+
+            for projected in (H, G):
+                value = host[slot]
+                slot += 1
+
+                if i == j:
+                    projected[si, sj] = (
+                        0.5 * (value + value.T)
+                    )
+                else:
+                    projected[si, sj] = value
+                    projected[sj, si] = value.T
+
+    return H, G
 
 
 def _rayleigh_ritz_blopex_standard(
     blocks,
     a_blocks,
     transpose,
-    small,
+    packed,
 ):
     """Perform the BLOPEX Rayleigh-Ritz step.
 
@@ -311,77 +420,10 @@ def _rayleigh_ritz_blopex_standard(
         The m smallest Ritz values.
     """
     blocks = tuple(blocks)
-    a_blocks = tuple(a_blocks)
-
-    if not blocks:
-        raise ValueError("blocks must not be empty.")
-
-    if len(blocks) != len(a_blocks):
-        raise ValueError(
-            "blocks and a_blocks must contain the same number of blocks."
-        )
-
-    n, m = tuple(blocks[0].shape)
-
-    if tuple(transpose.shape) != (m, n):
-        raise ValueError(
-            f"transpose must have shape {(m, n)}, "
-            f"got {tuple(transpose.shape)}."
-        )
-
-    if tuple(small.shape) != (m, m):
-        raise ValueError(
-            f"small must have shape {(m, m)}, "
-            f"got {tuple(small.shape)}."
-        )
-
-    for i, (block, a_block) in enumerate(zip(blocks, a_blocks)):
-        if tuple(block.shape) != (n, m):
-            raise ValueError(
-                f"blocks[{i}] must have shape {(n, m)}, "
-                f"got {tuple(block.shape)}."
-            )
-
-        if tuple(a_block.shape) != (n, m):
-            raise ValueError(
-                f"a_blocks[{i}] must have shape {(n, m)}, "
-                f"got {tuple(a_block.shape)}."
-            )
-
-    h_rows = []
-    g_rows = []
-
-    # Construct the projected matrices block by block. Only m-by-m
-    # matrices cross from the executor to the host.
-    for left in blocks:
-        left.transpose_into(transpose)
-
-        h_row = []
-        g_row = []
-
-        for right_a in a_blocks:
-            transpose.apply(right_a, small)
-            h_row.append(
-                np.array(
-                    small.copy_to_host(),
-                    copy=True,
-                ).reshape(m, m)
-            )
-
-        for right in blocks:
-            transpose.apply(right, small)
-            g_row.append(
-                np.array(
-                    small.copy_to_host(),
-                    copy=True,
-                ).reshape(m, m)
-            )
-
-        h_rows.append(h_row)
-        g_rows.append(g_row)
-
-    H = np.block(h_rows)
-    G = np.block(g_rows)
+    H, G = _project_blopex_upper(
+        blocks, a_blocks, transpose, packed
+    )
+    m = tuple(blocks[0].shape)[1]
 
     # H and G are theoretically symmetric.
     H = 0.5 * (H + H.T)
@@ -433,7 +475,7 @@ def _rayleigh_ritz_blopex_generalized(
     a_blocks,
     b_blocks,
     transpose,
-    small,
+    packed,
 ):
     """Perform generalized BLOPEX Rayleigh-Ritz.
 
@@ -461,93 +503,11 @@ def _rayleigh_ritz_blopex_generalized(
         The m smallest Ritz values.
     """
     blocks = tuple(blocks)
-    a_blocks = tuple(a_blocks)
-    b_blocks = tuple(b_blocks)
-
-    if not blocks:
-        raise ValueError("blocks must not be empty.")
-
-    if len(blocks) != len(a_blocks):
-        raise ValueError(
-            "blocks and a_blocks must contain the same number of blocks."
-        )
-
-    if len(blocks) != len(b_blocks):
-        raise ValueError(
-            "blocks and b_blocks must contain the same number of blocks."
-        )
-
-    n, m = tuple(blocks[0].shape)
-
-    if tuple(transpose.shape) != (m, n):
-        raise ValueError(
-            f"transpose must have shape {(m, n)}, "
-            f"got {tuple(transpose.shape)}."
-        )
-
-    if tuple(small.shape) != (m, m):
-        raise ValueError(
-            f"small must have shape {(m, m)}, "
-            f"got {tuple(small.shape)}."
-        )
-
-    for i, (block, a_block, b_block) in enumerate(
-        zip(blocks, a_blocks, b_blocks)
-    ):
-        if tuple(block.shape) != (n, m):
-            raise ValueError(
-                f"blocks[{i}] must have shape {(n, m)}, "
-                f"got {tuple(block.shape)}."
-            )
-
-        if tuple(a_block.shape) != (n, m):
-            raise ValueError(
-                f"a_blocks[{i}] must have shape {(n, m)}, "
-                f"got {tuple(a_block.shape)}."
-            )
-
-        if tuple(b_block.shape) != (n, m):
-            raise ValueError(
-                f"b_blocks[{i}] must have shape {(n, m)}, "
-                f"got {tuple(b_block.shape)}."
-            )
-
-    h_rows = []
-    g_rows = []
-
-    for left in blocks:
-        left.transpose_into(transpose)
-
-        h_row = []
-        g_row = []
-
-        # H_ij = V_i.T @ A @ V_j.
-        for right_a in a_blocks:
-            transpose.apply(right_a, small)
-
-            h_row.append(
-                np.array(
-                    small.copy_to_host(),
-                    copy=True,
-                ).reshape(m, m)
-            )
-
-        # G_ij = V_i.T @ B @ V_j.
-        for right_b in b_blocks:
-            transpose.apply(right_b, small)
-
-            g_row.append(
-                np.array(
-                    small.copy_to_host(),
-                    copy=True,
-                ).reshape(m, m)
-            )
-
-        h_rows.append(h_row)
-        g_rows.append(g_row)
-
-    H = np.block(h_rows)
-    G = np.block(g_rows)
+    H, G = _project_blopex_upper(
+        blocks, a_blocks, transpose, packed,
+        b_blocks=b_blocks,
+    )
+    m = tuple(blocks[0].shape)[1]
 
     # Theoretically symmetric, but remove small numerical asymmetry.
     H = 0.5 * (H + H.T)
@@ -599,13 +559,44 @@ def _rayleigh_ritz_blopex_generalized(
 
     return hX, Lambda
 
+def _upload_ritz(hX, Lambda, storage):
+    """Upload Ritz coefficients and eigenvalues together."""
+    hX = np.asarray(hX)
+    rows, m = hX.shape
+
+    if m == 0 or rows % m or not 1 <= rows // m <= 3:
+        raise ValueError(
+            "hX must contain one to three square blocks."
+        )
+
+    if np.asarray(Lambda).shape != (m,):
+        raise ValueError("Lambda must have shape (m,).")
+
+    payload = np.empty((rows + 1, m), dtype=hX.dtype)
+    payload[:rows] = hX
+    payload[rows] = Lambda
+
+    storage.create_submatrix(
+        0, rows + 1, 0, m
+    ).copy_from_numpy(payload)
+
+    coefficients = tuple(
+        storage.create_submatrix(i, i + m, 0, m)
+        for i in range(0, rows, m)
+    )
+    lambda_row = storage.create_submatrix(
+        rows, rows + 1, 0, m
+    )
+
+    return coefficients, lambda_row
+
 
 def _standard_residual(
     AX,
     X,
     Lambda,
     R,
-    work,
+    lambda_row,
     norms,
 ):
     """Compute the standard-problem relative residuals.
@@ -617,6 +608,9 @@ def _standard_residual(
     and returns
 
         ||R[:, i]||_2 / abs(Lambda[i]).
+
+    lambda_row is the executor-local eigenvalue row supplied
+    by _upload_ritz. No additional eigenvalue upload is needed.
     """
     n, m = tuple(X.shape)
 
@@ -630,9 +624,10 @@ def _standard_residual(
             f"R must have shape {(n, m)}, got {tuple(R.shape)}."
         )
 
-    if tuple(work.shape) != (n, m):
+    if tuple(lambda_row.shape) != (1, m):
         raise ValueError(
-            f"work must have shape {(n, m)}, got {tuple(work.shape)}."
+            f"lambda_row must have shape {(1, m)}, "
+            f"got {tuple(lambda_row.shape)}."
         )
 
     if tuple(norms.shape) != (1, m):
@@ -647,18 +642,9 @@ def _standard_residual(
             f"Lambda must contain {m} values, got {Lambda.size}."
         )
 
-    lambda_row = type(X)(
-        X.get_executor(),
-        np.ascontiguousarray(Lambda.reshape(1, m)),
-    )
-
-    # work[:, i] = Lambda[i] * X[:, i].
-    work.copy_from(X)
-    work.scale(lambda_row)
-
     # R = AX - X @ diag(Lambda).
     R.copy_from(AX)
-    R.sub_scaled(1.0, work)
+    R.sub_scaled(lambda_row, X)
 
     # Column-wise Euclidean norms.
     R.compute_norm2(norms)
@@ -687,7 +673,7 @@ def _generalized_residual(
     BX,
     Lambda,
     R,
-    work,
+    lambda_row,
     norms,
 ):
     """Compute generalized-problem relative residuals.
@@ -704,6 +690,9 @@ def _generalized_residual(
     and returns
 
         ||R[:, i]||_2 / abs(Lambda[i]).
+    
+    lambda_row is the executor-local eigenvalue row supplied
+    by _upload_ritz. No additional eigenvalue upload is needed.
     """
     n, m = tuple(AX.shape)
 
@@ -717,9 +706,10 @@ def _generalized_residual(
             f"R must have shape {(n, m)}, got {tuple(R.shape)}."
         )
 
-    if tuple(work.shape) != (n, m):
+    if tuple(lambda_row.shape) != (1, m):
         raise ValueError(
-            f"work must have shape {(n, m)}, got {tuple(work.shape)}."
+            f"lambda_row must have shape {(1, m)}, "
+            f"got {tuple(lambda_row.shape)}."
         )
 
     if tuple(norms.shape) != (1, m):
@@ -734,23 +724,9 @@ def _generalized_residual(
             f"Lambda must contain {m} values, got {Lambda.size}."
         )
 
-    lambda_row = type(BX)(
-        BX.get_executor(),
-        np.ascontiguousarray(
-            Lambda.reshape(1, m)
-        ),
-    )
-
-    # work[:, i] = Lambda[i] * BX[:, i].
-    work.copy_from(BX)
-    work.scale(lambda_row)
-
     # R = AX - BX @ diag(Lambda).
     R.copy_from(AX)
-    R.sub_scaled(
-        1.0,
-        work,
-    )
+    R.sub_scaled(lambda_row, BX)
 
     R.compute_norm2(norms)
 
@@ -887,10 +863,23 @@ def blopex_lobpcg_standard_impl_(
     AZ = X0.create_with_config_of()
     AP = X0.create_with_config_of()
 
-    # Reused small-product workspaces.
     transpose = X0.create_with_type_of((m, n))
-    small = X0.create_with_type_of((m, m))
+
+    # H and G each have at most six upper-triangle blocks.
+    rr_packed = X0.create_with_type_of((12 * m, m))
+    small = rr_packed.create_submatrix(0, m, 0, m)
+
     norms = X0.create_with_type_of((1, m))
+
+    # Reused across orthonormalization calls.
+    chol_coefficient = X0.create_with_type_of((m, m))
+
+    # Three Ritz coefficient blocks plus one eigenvalue row.
+    ritz_storage = X0.create_with_type_of((3 * m + 1, m))
+
+    # Reused by accumulated GEMMs and block additions.
+    one = X0.create_with_type_of((1, 1))
+    one.fill(1.0)
 
     # Residual history is deliberately host-side.
     res = np.full(
@@ -922,11 +911,12 @@ def blopex_lobpcg_standard_impl_(
     #       AX = A @ X
     # ==================================================================
 
-    _orthonormalize_blopex_standard(
+    X, _, W = _orthonormalize_blopex_standard(
         X,
         W,
         transpose,
         small,
+        coefficient=chol_coefficient
     )
 
     A.apply(X, AX)
@@ -935,17 +925,18 @@ def blopex_lobpcg_standard_impl_(
         (X,),
         (AX,),
         transpose,
-        small,
+        rr_packed,
     )
+    (C_X,), lambda_row = _upload_ritz(hX, Lambda, ritz_storage)
 
-    # X = X @ hX.
-    _right_multiply(X, hX, W)
-    X.copy_from(W)
+    # X = X @ C_X.
+    _right_multiply(X, C_X, W)
+    X, W = W, X
 
     if A_products == "implicit":
-        # AX = AX @ hX.
-        _right_multiply(AX, hX, W)
-        AX.copy_from(W)
+        # AX = AX @ C_X.
+        _right_multiply(AX, C_X, W)
+        AX, W = W, AX
     else:
         A.apply(X, AX)
 
@@ -955,7 +946,7 @@ def blopex_lobpcg_standard_impl_(
         X,
         Lambda,
         R,
-        W,
+        lambda_row,
         norms,
     )
 
@@ -983,7 +974,7 @@ def blopex_lobpcg_standard_impl_(
         if T is not None:
             T.apply(R, Z)
         else:
-            Z.copy_from(R)
+            Z, R = R, Z
 
         # Reference:
         #
@@ -991,11 +982,12 @@ def blopex_lobpcg_standard_impl_(
         #   U = chol(ZtZ)
         #   Z = solve(U.T, Z.T).T
         #
-        _orthonormalize_blopex_standard(
+        Z, _, W = _orthonormalize_blopex_standard(
             Z,
             W,
             transpose,
             small,
+            coefficient=chol_coefficient
         )
 
         A.apply(Z, AZ)
@@ -1015,24 +1007,23 @@ def blopex_lobpcg_standard_impl_(
                 (X, Z),
                 (AX, AZ),
                 transpose,
-                small,
+                rr_packed,
             )
+            (C_X, C_Z), lambda_row = _upload_ritz(hX, Lambda, ritz_storage)
 
-            hX_X = hX[:m, :]
-            hX_Z = hX[m:2 * m, :]
-
-            # P = Z @ hX_Z.
+            # P = Z @ C_Z.
             _right_multiply(
                 Z,
-                hX_Z,
+                C_Z,
                 P,
+                one=one
             )
 
             if A_products == "implicit":
-                # AP = AZ @ hX_Z.
+                # AP = AZ @ C_Z.
                 _right_multiply(
                     AZ,
-                    hX_Z,
+                    C_Z,
                     AP,
                 )
             else:
@@ -1058,19 +1049,21 @@ def blopex_lobpcg_standard_impl_(
             # ==========================================================
 
             if A_products == "implicit":
-                _orthonormalize_blopex_standard(
+                P, AP, W = _orthonormalize_blopex_standard(
                     P,
                     W,
                     transpose,
                     small,
                     AW=AP,
+                    coefficient=chol_coefficient,
                 )
             else:
-                _orthonormalize_blopex_standard(
+                P, _, W = _orthonormalize_blopex_standard(
                     P,
                     W,
                     transpose,
                     small,
+                    coefficient=chol_coefficient,
                 )
                 A.apply(P, AP)
 
@@ -1082,15 +1075,12 @@ def blopex_lobpcg_standard_impl_(
                 (X, Z, P),
                 (AX, AZ, AP),
                 transpose,
-                small,
+                rr_packed,
             )
-
-            hX_X = hX[:m, :]
-            hX_Z = hX[m:2 * m, :]
-            hX_P = hX[2 * m:3 * m, :]
+            (C_X, C_Z, C_P), lambda_row = _upload_ritz(hX, Lambda, ritz_storage)
 
             # ----------------------------------------------------------
-            # P = Z @ hX_Z + P @ hX_P
+            # P = Z @ C_Z + P @ C_P
             #
             # W is required because P_old must survive until both
             # contributions have been evaluated.
@@ -1098,73 +1088,60 @@ def blopex_lobpcg_standard_impl_(
 
             _right_multiply(
                 P,
-                hX_P,
+                C_P,
                 W,
             )
 
             _right_multiply(
                 Z,
-                hX_Z,
+                C_Z,
                 W,
                 beta=1.0,
+                one=one
             )
 
-            P.copy_from(W)
+            P, W = W, P
 
             if A_products == "implicit":
                 # ------------------------------------------------------
-                # AP = AZ @ hX_Z + AP @ hX_P
+                # AP = AZ @ C_Z + AP @ C_P
                 # ------------------------------------------------------
 
                 _right_multiply(
                     AP,
-                    hX_P,
+                    C_P,
                     W,
                 )
 
                 _right_multiply(
                     AZ,
-                    hX_Z,
+                    C_Z,
                     W,
                     beta=1.0,
+                    one=one
                 )
 
-                AP.copy_from(W)
+                AP, W = W, AP
 
             else:
                 A.apply(P, AP)
 
         # ==============================================================
-        # X = P + X @ hX_X
+        # X = P + X @ C_X
         # ==============================================================
 
-        W.copy_from(P)
-
-        _right_multiply(
-            X,
-            hX_X,
-            W,
-            beta=1.0,
-        )
-
-        X.copy_from(W)
+        _right_multiply(X, C_X, W)
+        W.add_scaled(one, P)
+        X, W = W, X
 
         if A_products == "implicit":
             # ==========================================================
-            # AX = AP + AX @ hX_X
+            # AX = AP + AX @ C_X
             # ==========================================================
 
-            W.copy_from(AP)
-
-            _right_multiply(
-                AX,
-                hX_X,
-                W,
-                beta=1.0,
-            )
-
-            AX.copy_from(W)
-
+            _right_multiply(AX, C_X, W)
+            W.add_scaled(one, AP)
+            AX, W = W, AX
         else:
             A.apply(X, AX)
 
@@ -1177,7 +1154,7 @@ def blopex_lobpcg_standard_impl_(
             X,
             Lambda,
             R,
-            W,
+            lambda_row,
             norms,
         )
 
@@ -1296,8 +1273,22 @@ def blopex_lobpcg_generalized_impl_(
     BP = X0.create_with_config_of()
 
     transpose = X0.create_with_type_of((m, n))
-    small = X0.create_with_type_of((m, m))
+
+    # H and G each have at most six upper-triangle blocks.
+    rr_packed = X0.create_with_type_of((12 * m, m))
+    small = rr_packed.create_submatrix(0, m, 0, m)
+
     norms = X0.create_with_type_of((1, m))
+
+    # Reused across orthonormalization calls.
+    chol_coefficient = X0.create_with_type_of((m, m))
+
+    # Three Ritz coefficient blocks plus one eigenvalue row.
+    ritz_storage = X0.create_with_type_of((3 * m + 1, m))
+
+    # Reused by accumulated GEMMs and block additions.
+    one = X0.create_with_type_of((1, 1))
+    one.fill(1.0)
 
     res = np.full(
         (m, itmax + 1),
@@ -1329,12 +1320,13 @@ def blopex_lobpcg_generalized_impl_(
 
     B.apply(X, BX)
 
-    _orthonormalize_blopex_generalized(
+    X, BX, _, W = _orthonormalize_blopex_generalized(
         X,
         BX,
         W,
         transpose,
         small,
+        coefficient=chol_coefficient,
         update_BW=(B_products == "implicit"),
     )
 
@@ -1348,36 +1340,37 @@ def blopex_lobpcg_generalized_impl_(
         (AX,),
         (BX,),
         transpose,
-        small,
+        rr_packed
     )
+    (C_X,), lambda_row = _upload_ritz(hX, Lambda, ritz_storage)
 
-    # X = X @ hX.
+    # X = X @ C_X.
     _right_multiply(
         X,
-        hX,
+        C_X,
         W,
     )
-    X.copy_from(W)
+    X, W = W, X
 
     if A_products == "implicit":
-        # AX = AX @ hX.
+        # AX = AX @ C_X.
         _right_multiply(
             AX,
-            hX,
+            C_X,
             W,
         )
-        AX.copy_from(W)
+        AX, W = W, AX
     else:
         A.apply(X, AX)
 
     if B_products == "implicit":
-        # BX = BX @ hX.
+        # BX = BX @ C_X.
         _right_multiply(
             BX,
-            hX,
+            C_X,
             W,
         )
-        BX.copy_from(W)
+        BX, W = W, BX
     else:
         B.apply(X, BX)
 
@@ -1387,7 +1380,7 @@ def blopex_lobpcg_generalized_impl_(
         BX,
         Lambda,
         R,
-        W,
+        lambda_row,
         norms,
     )
 
@@ -1419,7 +1412,7 @@ def blopex_lobpcg_generalized_impl_(
         if T is not None:
             T.apply(R, Z)
         else:
-            Z.copy_from(R)
+            Z, R = R, Z
 
         # --------------------------------------------------------------
         # B-orthonormalize Z.
@@ -1434,12 +1427,13 @@ def blopex_lobpcg_generalized_impl_(
 
         B.apply(Z, BZ)
 
-        _orthonormalize_blopex_generalized(
+        Z, BZ, _, W = _orthonormalize_blopex_generalized(
             Z,
             BZ,
             W,
             transpose,
             small,
+            coefficient=chol_coefficient,
             update_BW=(B_products == "implicit"),
         )
 
@@ -1464,34 +1458,33 @@ def blopex_lobpcg_generalized_impl_(
                 (AX, AZ),
                 (BX, BZ),
                 transpose,
-                small,
+                rr_packed
             )
+            (C_X, C_Z), lambda_row = _upload_ritz(hX, Lambda, ritz_storage)
 
-            hX_X = hX[:m, :]
-            hX_Z = hX[m:2 * m, :]
-
-            # P = Z @ hX_Z.
+            # P = Z @ C_Z.
             _right_multiply(
                 Z,
-                hX_Z,
+                C_Z,
                 P,
+                one=one
             )
 
             if A_products == "implicit":
-                # AP = AZ @ hX_Z.
+                # AP = AZ @ C_Z.
                 _right_multiply(
                     AZ,
-                    hX_Z,
+                    C_Z,
                     AP,
                 )
             else:
                 A.apply(P, AP)
 
             if B_products == "implicit":
-                # BP = BZ @ hX_Z.
+                # BP = BZ @ C_Z.
                 _right_multiply(
                     BZ,
-                    hX_Z,
+                    C_Z,
                     BP,
                 )
             else:
@@ -1516,21 +1509,20 @@ def blopex_lobpcg_generalized_impl_(
             #       BP = solve(U.T, BP.T).T
             # ==========================================================
 
-            _orthonormalize_blopex_generalized(
+            P, BP, normalized_AP, W = _orthonormalize_blopex_generalized(
                 P,
                 BP,
                 W,
                 transpose,
                 small,
-                AW=(
-                    AP
-                    if A_products == "implicit"
-                    else None
-                ),
+                coefficient=chol_coefficient,
+                AW=AP if A_products == "implicit" else None,
                 update_BW=(B_products == "implicit"),
             )
 
-            if A_products == "explicit":
+            if A_products == "implicit":
+                AP = normalized_AP
+            else:
                 A.apply(P, AP)
 
             if B_products == "explicit":
@@ -1545,128 +1537,105 @@ def blopex_lobpcg_generalized_impl_(
                 (AX, AZ, AP),
                 (BX, BZ, BP),
                 transpose,
-                small,
+                rr_packed,
             )
-
-            hX_X = hX[:m, :]
-            hX_Z = hX[m:2 * m, :]
-            hX_P = hX[2 * m:3 * m, :]
+            (C_X, C_Z, C_P), lambda_row = _upload_ritz(hX, Lambda, ritz_storage)
 
             # ----------------------------------------------------------
-            # P = Z @ hX_Z + P @ hX_P
+            # P = Z @ C_Z + P @ C_P
             # ----------------------------------------------------------
 
             _right_multiply(
                 P,
-                hX_P,
+                C_P,
                 W,
             )
 
             _right_multiply(
                 Z,
-                hX_Z,
+                C_Z,
                 W,
                 beta=1.0,
+                one=one
             )
 
-            P.copy_from(W)
+            P, W = W, P
 
             # ----------------------------------------------------------
-            # AP = AZ @ hX_Z + AP @ hX_P
+            # AP = AZ @ C_Z + AP @ C_P
             # ----------------------------------------------------------
 
             if A_products == "implicit":
                 _right_multiply(
                     AP,
-                    hX_P,
+                    C_P,
                     W,
                 )
 
                 _right_multiply(
                     AZ,
-                    hX_Z,
+                    C_Z,
                     W,
                     beta=1.0,
+                    one=one
                 )
 
-                AP.copy_from(W)
+                AP, W = W, AP
 
             else:
                 A.apply(P, AP)
 
             # ----------------------------------------------------------
-            # BP = BZ @ hX_Z + BP @ hX_P
+            # BP = BZ @ C_Z + BP @ C_P
             # ----------------------------------------------------------
 
             if B_products == "implicit":
                 _right_multiply(
                     BP,
-                    hX_P,
+                    C_P,
                     W,
                 )
 
                 _right_multiply(
                     BZ,
-                    hX_Z,
+                    C_Z,
                     W,
                     beta=1.0,
+                    one=one
                 )
 
-                BP.copy_from(W)
+                BP, W = W, BP
 
             else:
                 B.apply(P, BP)
 
         # ==============================================================
-        # X = P + X @ hX_X
+        # X = P + X @ C_X
         # ==============================================================
 
-        W.copy_from(P)
-
-        _right_multiply(
-            X,
-            hX_X,
-            W,
-            beta=1.0,
-        )
-
-        X.copy_from(W)
+        _right_multiply(X, C_X, W)
+        W.add_scaled(one, P)
+        X, W = W, X
 
         # ==============================================================
-        # AX = AP + AX @ hX_X
+        # AX = AP + AX @ C_X
         # ==============================================================
 
         if A_products == "implicit":
-            W.copy_from(AP)
-
-            _right_multiply(
-                AX,
-                hX_X,
-                W,
-                beta=1.0,
-            )
-
-            AX.copy_from(W)
-
+            _right_multiply(AX, C_X, W)
+            W.add_scaled(one, AP)
+            AX, W = W, AX
         else:
             A.apply(X, AX)
 
         # ==============================================================
-        # BX = BP + BX @ hX_X
+        # BX = BP + BX @ C_X
         # ==============================================================
 
         if B_products == "implicit":
-            W.copy_from(BP)
-
-            _right_multiply(
-                BX,
-                hX_X,
-                W,
-                beta=1.0,
-            )
-
-            BX.copy_from(W)
-
+            _right_multiply(BX, C_X, W)
+            W.add_scaled(one, BP)
+            BX, W = W, BX
         else:
             B.apply(X, BX)
 
@@ -1679,7 +1648,7 @@ def blopex_lobpcg_generalized_impl_(
             BX,
             Lambda,
             R,
-            W,
+            lambda_row,
             norms,
         )
 

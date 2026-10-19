@@ -243,9 +243,11 @@ void init_dense(py::module_ &module_matrix, const std::string typestr)
         .def_buffer([](gko::matrix::Dense<ValueType> &m) -> py::buffer_info {
             // buffer info needs data on host, thus if data is on device it
             // should be copied to host first
-            size_t rows = m.get_num_stored_elements() / m.get_stride();
-            size_t cols = m.get_stride();
-            size_t dim = (m.get_stride() == 1) ? 1 : 2;
+            const auto size = m.get_size();
+            size_t rows = size[0];
+            size_t cols = size[1];
+            size_t stride = m.get_stride();
+            size_t dim = (cols == 1 && stride == 1) ? 1 : 2;
 
             ValueType *buffer_ptr = nullptr;
             if (m.get_executor() != m.get_executor()->get_master()) {
@@ -276,7 +278,7 @@ void init_dense(py::module_ &module_matrix, const std::string typestr)
                     dim, /* Number of dimensions */
                     // TODO: potential mistake:
                     {rows, cols}, /* Buffer dimensions */
-                    {sizeof(ValueType) * cols, sizeof(ValueType)}
+                    {sizeof(ValueType) * stride, sizeof(ValueType)}
                     /* Strides (in bytes) for each index */
                 );
             }
@@ -304,6 +306,20 @@ void init_dense(py::module_ &module_matrix, const std::string typestr)
             },
             py::arg("alpha"), py::arg("b"), py::arg("beta"), py::arg("x"),
             "Computes x = alpha * (self @ b) + beta * x.")
+        .def(
+            "apply",
+            [](const dense_type &self, std::shared_ptr<const gko::LinOp> alpha,
+               std::shared_ptr<const gko::LinOp> b,
+               std::shared_ptr<const gko::LinOp> beta,
+               std::shared_ptr<gko::LinOp> out) {
+                if (!alpha || !b || !beta || !out) {
+                    throw py::value_error("Arguments must not be None");
+                }
+
+                self.apply(alpha.get(), b.get(), beta.get(), out.get());
+            },
+            py::arg("alpha"), py::arg("b"), py::arg("beta"), py::arg("out"),
+            "Computes out = alpha * self @ b + beta * out.")
         // Dense scalar / row-vector scaling
         .def(
             "scale",
@@ -459,7 +475,48 @@ void init_dense(py::module_ &module_matrix, const std::string typestr)
 
                 self.compute_norm2(result);
             },
-            py::arg("result"), "Computes one Euclidean norm per column.");
+            py::arg("result"), "Computes one Euclidean norm per column.")
+        .def(
+            "create_submatrix",
+            [](dense_type &self, gko::size_type r0, gko::size_type r1,
+               gko::size_type c0, gko::size_type c1) {
+                const auto size = self.get_size();
+
+                if (r0 > r1 || r1 > size[0] || c0 > c1 || c1 > size[1]) {
+                    throw py::value_error("Invalid submatrix bounds");
+                }
+
+                return gko::share(self.create_submatrix(gko::span{r0, r1},
+                                                        gko::span{c0, c1}));
+            },
+            py::arg("r0"), py::arg("r1"), py::arg("c0"), py::arg("c1"),
+            py::keep_alive<0, 1>(),
+            "Creates a shared-storage view using half-open bounds.")
+
+        .def(
+            "copy_from_numpy",
+            [](dense_type &self,
+               py::array_t<ValueType, py::array::c_style | py::array::forcecast>
+                   values) {
+                const auto size = self.get_size();
+
+                if (values.ndim() != 2 ||
+                    values.shape(0) != static_cast<py::ssize_t>(size[0]) ||
+                    values.shape(1) != static_cast<py::ssize_t>(size[1])) {
+                    throw py::value_error(
+                        "NumPy array must match the matrix shape");
+                }
+
+                if (self.get_stride() != size[1]) {
+                    throw py::value_error("Destination must be contiguous");
+                }
+
+                auto exec = self.get_executor();
+                exec->copy_from(exec->get_master(), size[0] * size[1],
+                                values.data(), self.get_values());
+            },
+            py::arg("values"),
+            "Copies a NumPy array into existing contiguous storage.");
 
 #ifdef GINKGO_BUILD_CUDA
     // __cuda_array_interface__ (v3) for zero-copy interop with CuPy and
