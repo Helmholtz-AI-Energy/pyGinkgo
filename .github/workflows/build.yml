@@ -12,6 +12,17 @@ env:
 jobs:
   build-cmake:
     runs-on: ubuntu-latest
+    name: build-cmake (${{ matrix.preset }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 'develop' keeps the MPI-off build covered: the wheels ship without
+        # MPI, and it is the only configuration that exercises the distributed
+        # stub (pyGinkgo.distributed.available == False).
+        # 'develop-mpi' compiles the distributed bindings and runs their tests,
+        # both single-rank and under mpiexec with 2 ranks.
+        preset: [develop, develop-mpi]
 
     steps:
     - name: Checkout code
@@ -31,20 +42,29 @@ jobs:
         sudo apt-get install -y libopenmpi-dev
         pip install pytest numpy torch
 
+    - name: Install mpi4py
+      if: matrix.preset == 'develop-mpi'
+      # mpi4py has to link the SAME MPI implementation as Ginkgo: pyGinkgo
+      # hands an MPI_Comm handle from mpi4py straight to Ginkgo via
+      # MPI_Comm_f2c, so a PyPI wheel bundling its own MPI would be an ABI
+      # mismatch that crashes at runtime rather than failing to import.
+      # Building from source pins it to the libopenmpi-dev installed above.
+      run: pip install --no-binary=mpi4py mpi4py
+
     - name: Set up cache
       uses: actions/cache@v4
       with:
         path: build
-        key: cmake_${{ github.event.pull_request.number }}
+        key: cmake_${{ matrix.preset }}_${{ github.event.pull_request.number }}
 
     - name: Configure CMake
-      run: cmake --preset develop -DGINKGO_BUILD_OMP=OFF
+      run: cmake --preset ${{ matrix.preset }} -DGINKGO_BUILD_OMP=OFF
 
     - name: Build with CMake
-      run: cmake --build --preset develop -j 2
+      run: cmake --build --preset ${{ matrix.preset }} -j 2
 
     - name: Run specific test
-      run: ctest --preset develop
+      run: ctest --preset ${{ matrix.preset }}
   build-pip:
     runs-on: ubuntu-latest
 
