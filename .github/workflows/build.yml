@@ -11,8 +11,8 @@ env:
 
 jobs:
   build-cmake:
-    runs-on: ubuntu-latest
-    name: build-cmake (${{ matrix.preset }})
+    runs-on: ${{ matrix.config.os }}
+    name: build-cmake (${{ matrix.preset }}, Python ${{ matrix.config.python }}, ${{ matrix.config.os }})
 
     strategy:
       fail-fast: false
@@ -23,15 +23,27 @@ jobs:
         # 'develop-mpi' compiles the distributed bindings and runs their tests,
         # both single-rank and under mpiexec with 2 ranks.
         preset: [develop, develop-mpi]
+        config:
+          - os: ubuntu-latest
+            python: '3.12'
+          - os: ubuntu-24.04
+            python: '3.9'
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v7
       with:
-        python-version: '3.9'
+        python-version: ${{ matrix.config.python }}
+
+    # Separate caches when the actual ubuntu-latest OS version changes.
+    - name: Identify runner OS
+      id: platform
+      run: |
+        source /etc/os-release
+        echo "os=${ID}-${VERSION_ID}" >> "$GITHUB_OUTPUT"
 
     - name: Install build dependencies
       run: sudo apt-get install -y cmake ninja-build
@@ -66,16 +78,26 @@ jobs:
     - name: Run specific test
       run: ctest --preset ${{ matrix.preset }}
   build-pip:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.config.os }}
+    name: build-pip (Python ${{ matrix.config.python }}, ${{ matrix.config.os }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - os: ubuntu-latest
+            python: '3.12'
+          - os: ubuntu-24.04
+            python: '3.9'
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v7
       with:
-        python-version: '3.9'
+        python-version: ${{ matrix.config.python }}
 
     - name: Install dependencies
       run: |
