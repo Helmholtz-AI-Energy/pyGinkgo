@@ -40,7 +40,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y libopenmpi-dev
-        pip install pytest numpy torch
+        pip install pytest numpy scipy torch
 
     - name: Install mpi4py
       if: matrix.preset == 'develop-mpi'
@@ -81,7 +81,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y libopenmpi-dev
-        pip install pytest numpy torch build
+        pip install pytest numpy scipy torch build
 
     - name: Set up cache
       uses: actions/cache@v4

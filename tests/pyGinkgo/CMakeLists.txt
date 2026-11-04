@@ -21,6 +21,7 @@ pyginkgo_python_test(solve)
 pyginkgo_python_test(RR)
 pyginkgo_python_test(core)
 pyginkgo_python_test(wrappers)
+pyginkgo_python_test(lobpcg)
 
 # Distributed / MPI bindings. The test file skips itself gracefully when the
 # build has no MPI support or when mpi4py is missing, so it is always registered
