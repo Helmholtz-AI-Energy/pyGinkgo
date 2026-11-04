@@ -13,7 +13,7 @@ jobs:
   build-cmake:
     runs-on: ubuntu-latest
     name: build-cmake (${{ matrix.preset }})
-    
+
     strategy:
       fail-fast: false
       matrix:
